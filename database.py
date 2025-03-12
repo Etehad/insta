@@ -4,6 +4,41 @@ import uuid
 
 DB_FILE = "database.json"
 
+BACKUP_FILE = "database_backup.json"
+
+def backup_database():
+    """Export database to a backup file"""
+    try:
+        data = {}
+        for key in keys():
+            data[key] = get(key)
+        
+        with open(BACKUP_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"Database backed up to {BACKUP_FILE}")
+        return True
+    except Exception as e:
+        print(f"Error backing up database: {str(e)}")
+        return False
+
+def restore_database():
+    """Import database from backup file"""
+    if not os.path.exists(BACKUP_FILE):
+        print(f"No backup file found at {BACKUP_FILE}")
+        return False
+    
+    try:
+        with open(BACKUP_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        for key, value in data.items():
+            set(key, value)
+        
+        print(f"Database restored from {BACKUP_FILE}")
+        return True
+    except Exception as e:
+        print(f"Error restoring database: {str(e)}")
+        return False
 def initialize_db():
     if not os.path.exists(DB_FILE):
         with open(DB_FILE, "w") as f:
