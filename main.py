@@ -56,6 +56,7 @@ def run_flask():
 
 # راه‌اندازی پایگاه داده
 db.initialize_db()
+db.restore_database()
 
 # ورود به اینستاگرام
 ig_client = Client()
@@ -196,6 +197,8 @@ def button_handler(update: Update, context):
             "لطفاً نام کاربری آن را با فرمت `@username` ارسال کنید.\n\n"
             "مثال: `@instagram`"
         )
+        # Store user state to know they're in profile retrieval mode
+        context.user_data['state'] = 'awaiting_username'
         print(f"Profile retrieval instruction sent to user {user_id}")
 
 # تابع بررسی عضویت
@@ -226,6 +229,11 @@ def check_membership(update: Update, context) -> bool:
         reply_markup=reply_markup
     )
     return False
+
+def periodic_backup(context):
+    db.backup_database()
+    job_queue = updater.job_queue
+job_queue.run_repeating(periodic_backup, interval=3600, first=300)
 
 # تابع دانلود و ارسال پست
 def process_and_send_post(media_id, chat_id, context):
@@ -540,7 +548,7 @@ def check_instagram_dms(context):
 
         except Exception as e:
             print(f"خطا در چک کردن دایرکت‌ها: {str(e)}")
-        time.sleep(3)
+        time.sleep(10)
 
 # تابع دریافت لینک مستقیم
 def handle_link(update: Update, context):
@@ -624,6 +632,16 @@ def admin_button_handler(update: Update, context):
         query.edit_message_text("لطفاً متن پیام همگانی را ارسال کنید.")
         context.user_data['state'] = 'awaiting_broadcast'
 
+def handle_username(update: Update, context):
+    message_text = update.message.text
+    if message_text.startswith('@'):
+        username = message_text.strip()
+        chat_id = update.effective_chat.id
+        print(f"Processing username request: {username} from user {chat_id}")
+        process_and_send_profile(username, chat_id, context)
+        return True
+    return False
+
 # دریافت پیام همگانی
 def handle_message(update: Update, context):
     if 'state' in context.user_data and context.user_data['state'] == 'awaiting_broadcast':
@@ -656,6 +674,7 @@ def main():
 
     # هندلرها
     dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.regex(r'^@[\w.]+$'), handle_username))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))  # فقط پیام‌های متنی
     dispatcher.add_handler(CommandHandler("admin", admin))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
