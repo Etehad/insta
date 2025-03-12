@@ -121,3 +121,22 @@ def __getitem__(key):
     except Exception as e:
         print(f"خطا در دریافت داده: {str(e)}")
         return {}
+
+# Add to database.py
+def get_user_downloads(user_id):
+    """Retrieve download history for a specific user"""
+    downloads = []
+    prefix = f"download_{user_id}_"
+    for key in keys():
+        if key.startswith(prefix):
+            downloads.append(get(key))
+    return sorted(downloads, key=lambda x: x["timestamp"], reverse=True)
+
+def add_download(user_id, download_type, timestamp):
+    """Add a new download record for a user"""
+    download_id = f"download_{user_id}_{timestamp}"
+    set(download_id, {
+        "user_id": user_id,
+        "type": download_type,
+        "timestamp": timestamp
+    })
