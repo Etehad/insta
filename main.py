@@ -658,6 +658,7 @@ def main():
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))  # فقط پیام‌های متنی
     dispatcher.add_handler(CommandHandler("admin", admin))
+    dispatcher.add_handler(CallbackQueryHandler(button_handler))
     dispatcher.add_handler(CallbackQueryHandler(admin_button_handler))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
