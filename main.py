@@ -21,7 +21,9 @@ from instagrapi.exceptions import TwoFactorRequired, ClientError
 import database as db
 import threading
 import time
+import re
 from flask import Flask
+from datetime import datetime
 
 # توکن ربات تلگرام
 TOKEN = os.getenv('TOKEN', '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU')
@@ -104,7 +106,9 @@ def start(update: Update, context):
     keyboard = [
         [InlineKeyboardButton("دریافت توکن اتصال به اینستاگرام", callback_data="get_token")],
         [InlineKeyboardButton("راهنمای اتصال به اینستاگرام", callback_data="instagram_help")],
-        [InlineKeyboardButton("ارسال لینک مستقیم", callback_data="manual_link")]
+        [InlineKeyboardButton("ارسال لینک مستقیم", callback_data="manual_link")],
+        [InlineKeyboardButton("تاریخچه بارگیری", callback_data="download_history")],
+        [InlineKeyboardButton("دریافت پروفایل", callback_data="get_profile")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -112,7 +116,9 @@ def start(update: Update, context):
         "سلام! به ربات دانلود اینستاگرام خوش آمدید.\n\n"
         "شما می‌توانید:\n"
         "1️⃣ توکن اتصال به اینستاگرام دریافت کنید تا پست‌های شما به صورت خودکار دانلود شود\n"
-        "2️⃣ یا به صورت مستقیم لینک پست را ارسال کنید\n\n"
+        "2️⃣ یا به صورت مستقیم لینک پست را ارسال کنید\n"
+        "3️⃣ تاریخچه بارگیری خود را مشاهده کنید\n"
+        "4️⃣ اطلاعات پروفایل کاربران اینستاگرام را دریافت کنید\n\n"
         "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
         reply_markup=reply_markup
     )
@@ -133,7 +139,7 @@ def button_handler(update: Update, context):
             reply_markup = InlineKeyboardMarkup(keyboard)
             query.edit_message_text(
                 f"توکن شما:\n\n`{token}`\n\n"
-                "این توکن را در دایرکت اکانت اینستاگرام خود به پیج 'etehadtaskforce' ارسال کنید.\n"
+                "این توکن را در دایرکت اکانت اینستاگرام پیج [etehadtaskforce](https://www.instagram.com/etehadtaskforce) ارسال کنید.\n"
                 "پس از اتصال، هر پستی که در دایرکت برای این پیج Share کنید به صورت خودکار برای شما دانلود خواهد شد.\n\n"
                 "اگر مشکلی داشتید، از راهنما استفاده کنید!",
                 parse_mode="Markdown",
@@ -148,10 +154,9 @@ def button_handler(update: Update, context):
         query.edit_message_text(
             "📱 **راهنمای اتصال به اینستاگرام:**\n\n"
             "1. ابتدا دکمه 'دریافت توکن اتصال به اینستاگرام' را بزنید و توکن خود را دریافت کنید.\n"
-            "2. به اینستاگرام بروید و به پیج 'etehadtaskforce' پیام دهید.\n"
-            "3. توکن خود را در دایرکت ارسال کنید.\n"
-            "4. پس از تأیید توسط ربات، پیامی دریافت خواهید کرد.\n"
-            "5. حالا می‌توانید پست‌های اینستاگرام را در دایرکت این پیج Share کنید تا به‌صورت خودکار دانلود شوند.\n\n"
+            "2. توکن خود را به در دایرکت پیج [etehadtaskforce](https://www.instagram.com/etehadtaskforce) در اینستاگرام ارسال کنید.\n"
+            "3. پس از تأیید توسط ربات، پیامی دریافت خواهید کرد.\n"
+            "4. حالا می‌توانید پست‌ و استوری اینستاگرام را در دایرکت این پیج Share کنید تا به‌صورت خودکار دانلود شوند.\n\n"
             "برای بازگشت به منو اصلی، دستور /start را ارسال کنید.",
             parse_mode="Markdown"
         )
@@ -159,11 +164,39 @@ def button_handler(update: Update, context):
 
     elif query.data == "manual_link":
         query.edit_message_text(
-            "لطفاً لینک پست یا ریل اینستاگرام خود را در چت ارسال کنید.\n"
-            "مثال: https://www.instagram.com/p/Cabc123/\n"
+            "لطفاً لینک پست، ریل یا استوری اینستاگرام خود را در چت ارسال کنید.\n"
+            "مثال پست: https://www.instagram.com/p/Cabc123/\n"
+            "مثال ریل: https://www.instagram.com/reel/Cabc123/\n"
+            "مثال استوری: https://www.instagram.com/stories/username/123456789/\n"
             "ربات به‌صورت خودکار لینک را پردازش کرده و محتوا را برای شما ارسال خواهد کرد."
         )
         print(f"Manual link instruction sent to user {user_id}")
+        
+    elif query.data == "download_history":
+        downloads = db.get_user_downloads(user_id)
+        if downloads and len(downloads) > 0:
+            history_text = "📥 **تاریخچه بارگیری شما:**\n\n"
+            for i, download in enumerate(downloads, 1):
+                download_time = datetime.fromtimestamp(download["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+                history_text += f"{i}. نوع: {download['type']}, زمان: {download_time}\n"
+            history_text += f"\n**تعداد کل بارگیری‌ها: {len(downloads)}**"
+            
+            query.edit_message_text(
+                history_text,
+                parse_mode="Markdown"
+            )
+        else:
+            query.edit_message_text("شما هنوز هیچ بارگیری‌ای انجام نداده‌اید.")
+        print(f"Download history sent to user {user_id}")
+        
+    elif query.data == "get_profile":
+        query.edit_message_text(
+            "🔍 **دریافت اطلاعات پروفایل:**\n\n"
+            "برای دریافت اطلاعات پروفایل و تصویر پروفایل یک کاربر اینستاگرام،\n"
+            "لطفاً نام کاربری آن را با فرمت `@username` ارسال کنید.\n\n"
+            "مثال: `@instagram`"
+        )
+        print(f"Profile retrieval instruction sent to user {user_id}")
 
 # تابع بررسی عضویت
 def check_membership(update: Update, context) -> bool:
@@ -244,6 +277,9 @@ def process_and_send_post(media_id, chat_id, context):
                         )
                         video_sent = True
                         print(f"ویدیو با موفقیت ارسال شد: {video_path}")
+                        
+                        # افزودن به تاریخچه دانلود
+                        db.add_download(chat_id, "ویدیو", time.time())
                 except Exception as e:
                     print(f"خطا در ارسال ویدیو: {str(e)}")
                     context.bot.send_message(chat_id=chat_id, text=f"خطا در ارسال ویدیو: {str(e)}")
@@ -268,6 +304,10 @@ def process_and_send_post(media_id, chat_id, context):
                             )
                             cover_sent = True
                             print(f"کاور با موفقیت ارسال شد: {file_path}")
+                            
+                            # افزودن به تاریخچه دانلود
+                            if not video_sent:  # اگر ویدیو ارسال نشده باشد (فقط عکس)
+                                db.add_download(chat_id, "عکس", time.time())
                     except Exception as e:
                         print(f"خطا در ارسال کاور: {str(e)}")
                         context.bot.send_message(chat_id=chat_id, text=f"خطا در ارسال کاور: {str(e)}")
@@ -301,10 +341,24 @@ def process_and_send_story(story_id, telegram_id, context):
             photo_url = getattr(media, 'thumbnail_url', None)
             if video_url:
                 context.bot.send_message(chat_id=telegram_id, text="در حال دانلود استوری...")
-                context.bot.send_video(chat_id=telegram_id, video=video_url, caption="استوری شما")
+                context.bot.send_video(
+                    chat_id=telegram_id, 
+                    video=video_url, 
+                    caption="[TaskForce](https://t.me/task_1_4_1_force)", 
+                    parse_mode="Markdown"
+                )
+                db.add_download(telegram_id, "استوری ویدیویی", time.time())
+                print(f"استوری ویدیویی با موفقیت ارسال شد")
             elif photo_url:
                 context.bot.send_message(chat_id=telegram_id, text="در حال دانلود استوری...")
-                context.bot.send_photo(chat_id=telegram_id, photo=photo_url, caption="استوری شما")
+                context.bot.send_photo(
+                    chat_id=telegram_id, 
+                    photo=photo_url, 
+                    caption="[TaskForce](https://t.me/task_1_4_1_force)", 
+                    parse_mode="Markdown"
+                )
+                db.add_download(telegram_id, "استوری تصویری", time.time())
+                print(f"استوری تصویری با موفقیت ارسال شد")
             else:
                 context.bot.send_message(chat_id=telegram_id, text="استوری مورد نظر قابل دانلود نیست.")
         else:
@@ -312,6 +366,93 @@ def process_and_send_story(story_id, telegram_id, context):
     except Exception as e:
         print(f"خطا در دانلود استوری: {str(e)}")
         context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود استوری: {str(e)}")
+
+# تابع دریافت و ارسال پروفایل
+def process_and_send_profile(username, chat_id, context):
+    try:
+        print(f"شروع دریافت پروفایل برای username: {username}, chat_id: {chat_id}")
+        # حذف @ اگر وجود داشته باشد
+        if username.startswith('@'):
+            username = username[1:]
+            
+        # دریافت اطلاعات پروفایل
+        user_info = ig_client.user_info_by_username(username)
+        if not user_info:
+            context.bot.send_message(chat_id=chat_id, text=f"کاربری با نام کاربری {username} یافت نشد.")
+            return
+            
+        # دریافت عکس پروفایل
+        profile_pic_url = user_info.profile_pic_url
+        
+        # جمع‌آوری اطلاعات
+        full_name = user_info.full_name or "نامشخص"
+        biography = user_info.biography or "بیوگرافی ندارد"
+        follower_count = user_info.follower_count
+        following_count = user_info.following_count
+        media_count = user_info.media_count
+        is_private = "خصوصی" if user_info.is_private else "عمومی"
+        
+        # ساخت پیام
+        profile_info = (
+            f"📊 **اطلاعات پروفایل @{username}**\n\n"
+            f"👤 **نام:** {full_name}\n"
+            f"🔐 **وضعیت حساب:** {is_private}\n"
+            f"👥 **دنبال‌کنندگان:** {follower_count:,}\n"
+            f"👣 **دنبال‌شده‌ها:** {following_count:,}\n"
+            f"📸 **تعداد پست‌ها:** {media_count:,}\n\n"
+            f"📝 **بیوگرافی:**\n{biography}"
+        )
+        
+        # ارسال عکس پروفایل و اطلاعات
+        context.bot.send_photo(
+            chat_id=chat_id,
+            photo=profile_pic_url,
+            caption=profile_info,
+            parse_mode="Markdown"
+        )
+        
+        # افزودن به تاریخچه دانلود
+        db.add_download(chat_id, "پروفایل", time.time())
+        print(f"پروفایل با موفقیت ارسال شد: {username}")
+        
+    except Exception as e:
+        print(f"خطا در دریافت پروفایل: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در دریافت پروفایل: {str(e)}")
+
+# تابع استخراج و پردازش استوری از لینک
+def handle_story_link(story_url, chat_id, context):
+    try:
+        print(f"پردازش لینک استوری: {story_url}")
+        # الگوی لینک استوری: instagram.com/stories/username/123456789
+        pattern = r"instagram\.com/stories/([^/]+)/(\d+)"
+        match = re.search(pattern, story_url)
+        
+        if match:
+            username = match.group(1)
+            story_id = match.group(2)
+            print(f"Username: {username}, Story ID: {story_id}")
+            
+            # دریافت اطلاعات کاربر
+            user_info = ig_client.user_info_by_username(username)
+            if not user_info:
+                context.bot.send_message(chat_id=chat_id, text=f"کاربری با نام کاربری {username} یافت نشد.")
+                return
+                
+            user_id = user_info.pk
+            print(f"User ID: {user_id}")
+            
+            # تبدیل story_id به media_pk
+            story_pk = int(story_id)
+            
+            # دانلود و ارسال استوری
+            process_and_send_story(story_pk, chat_id, context)
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"خطا در پردازش لینک استوری: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در پردازش لینک استوری: {str(e)}")
+        return False
 
 # تابع چک کردن دایرکت‌ها
 def check_instagram_dms(context):
@@ -363,7 +504,7 @@ def check_instagram_dms(context):
                                     target=process_and_send_post,
                                     args=(media_id, telegram_id, context)
                                 ).start()
-                                ig_client.direct_send(
+                                ig_client.direct(
                                     "پست/کلیپ Share شده شما دریافت شد و در حال پردازش است.",
                                     user_ids=[sender_id]
                                 )
@@ -399,7 +540,7 @@ def check_instagram_dms(context):
 
         except Exception as e:
             print(f"خطا در چک کردن دایرکت‌ها: {str(e)}")
-        time.sleep(30)
+        time.sleep(3)
 
 # تابع دریافت لینک مستقیم
 def handle_link(update: Update, context):
@@ -445,13 +586,11 @@ def handle_link(update: Update, context):
         print(f"Ignored message in chat {chat_id}: {message_text}")
         return
 
-# تابع پنل ادمین
 def admin(update: Update, context):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
         update.message.reply_text("شما دسترسی به این بخش را ندارید!")
         return
-
     keyboard = [
         [InlineKeyboardButton("مشاهده کاربران", callback_data="view_users")],
         [InlineKeyboardButton("ارسال پیام همگانی", callback_data="broadcast")]
@@ -463,12 +602,12 @@ def admin(update: Update, context):
 def admin_button_handler(update: Update, context):
     query = update.callback_query
     query.answer()
-
-    user_id = update.effective_user.id
+    
+    user_id = query.from_user.id
     if user_id != ADMIN_ID:
         query.edit_message_text("شما دسترسی به این بخش را ندارید!")
         return
-
+    
     if query.data == "view_users":
         users = []
         for key in db.keys():
@@ -480,7 +619,7 @@ def admin_button_handler(update: Update, context):
             query.edit_message_text(f"لیست کاربران:\n{user_list}")
         else:
             query.edit_message_text("هیچ کاربری ثبت نشده است.")
-
+    
     elif query.data == "broadcast":
         query.edit_message_text("لطفاً متن پیام همگانی را ارسال کنید.")
         context.user_data['state'] = 'awaiting_broadcast'
@@ -492,13 +631,18 @@ def handle_message(update: Update, context):
             update.message.reply_text("شما دسترسی به این بخش را ندارید!")
             return
         message_text = update.message.text
+        sent_count = 0
         for key in db.keys():
             if key.startswith("user_"):
                 user_data = db[key]
                 telegram_id = user_data["telegram_id"]
-                context.bot.send_message(chat_id=telegram_id, text=message_text)
-        update.message.reply_text("پیام همگانی با موفقیت ارسال شد.")
-        del context.user_data['state']
+                try:
+                    context.bot.send_message(chat_id=telegram_id, text=message_text)
+                    sent_count += 1
+                except Exception as e:
+                    continue
+        update.message.reply_text(f"پیام همگانی با موفقیت به {sent_count} کاربر ارسال شد.")
+        context.user_data.clear()  # پاک کردن حالت
 
 # تابع دیباگ
 def debug_handler(update: Update, context):
@@ -514,7 +658,6 @@ def main():
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))  # فقط پیام‌های متنی
     dispatcher.add_handler(CommandHandler("admin", admin))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
     dispatcher.add_handler(CallbackQueryHandler(admin_button_handler))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
