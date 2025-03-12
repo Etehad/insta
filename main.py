@@ -1,4 +1,18 @@
 import os
+import sys
+
+# تلاش برای نصب Pillow اگر وجود ندارد
+try:
+    from PIL import Image
+except ImportError:
+    import subprocess
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pillow>=8.1.1"])
+        print("Pillow با موفقیت نصب شد.")
+    except Exception as e:
+        print(f"خطا در نصب Pillow: {str(e)}")
+
+# ادامه import های کد
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 import instaloader
@@ -35,8 +49,8 @@ def ping():
 # در بخش run_flask
 def run_flask():
     print("Starting Flask server for 24/7 activity...")
-    port = int(os.getenv("PORT", 8080))  # پورت پیش‌فرض Replit
-    app.run(host='0.0.0.0', port=port, debug=False)  # debug=False برای جلوگیری از ری‌استارت‌های غیرضروری
+    port = int(os.environ.get("PORT", 8080))  # پورت پیش‌فرض Render
+    app.run(host='0.0.0.0', port=port, debug=False)  # استفاده از پورت محیطی
 
 # راه‌اندازی پایگاه داده
 db.initialize_db()
