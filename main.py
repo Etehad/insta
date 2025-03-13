@@ -48,10 +48,15 @@ app = Flask(__name__)
 def ping():
     return "Bot is alive!", 200
 
-# در بخش run_flask
+# تغییر در تابع run_flask
 def run_flask():
     print("Starting Flask server for 24/7 activity...")
     port = int(os.environ.get("PORT", 8080))  # پورت پیش‌فرض Render
+    
+    # اطمینان از استفاده از پورت متفاوت برای Flask و تلگرام
+    if port == int(os.environ.get("PORT", 8443)):
+        port = port + 1
+    
     app.run(host='0.0.0.0', port=port, debug=False)  # استفاده از پورت محیطی
 
 # راه‌اندازی پایگاه داده
@@ -695,7 +700,7 @@ def handle_message(update: Update, context):
 def debug_handler(update: Update, context):
     print(f"Debug: Received any message: {update.message.text}")
 
-# تابع اصلی
+# تغییر در تابع main
 def main():
     print("Bot is starting...")
     updater = Updater(TOKEN, use_context=True)
@@ -711,14 +716,29 @@ def main():
     dispatcher.add_handler(CallbackQueryHandler(admin_button_handler))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
-    # حذف هندلر دیباگ یا غیرضروری برای جلوگیری از واکنش به همه پیام‌ها
-    # dispatcher.add_handler(MessageHandler(Filters.all, debug_handler))
-
-    threading.Thread(target=check_instagram_dms, args=(dispatcher,), daemon=True).start()
-    updater.start_polling()
-
-    threading.Thread(target=run_flask, daemon=False).start()
-
+    threading.Thread(target=check_instagram_dms, args=(updater.dispatcher,), daemon=True).start()
+    
+    # اجرای Flask در ترد جداگانه
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    # استفاده از start_webhook به جای start_polling برای جلوگیری از تداخل
+    PORT = int(os.environ.get("PORT", 8443))
+    WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+    
+    if WEBHOOK_URL:
+        # اگر آدرس webhook تعریف شده باشد، از webhook استفاده کن
+        updater.start_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=TOKEN,
+            webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
+        )
+        print(f"Bot started with webhook on port {PORT}")
+    else:
+        # در غیر این صورت از polling استفاده کن
+        updater.start_polling(drop_pending_updates=True)
+        print("Bot started with polling")
+    
     updater.idle()
 
 if __name__ == "__main__":
