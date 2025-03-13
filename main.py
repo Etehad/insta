@@ -27,37 +27,23 @@ from datetime import datetime
 
 # توکن ربات تلگرام
 TOKEN = os.getenv('TOKEN', '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU')
-
-# تنظیمات ادمین
 ADMIN_ID = 6473845417
-
-# تنظیم کانال‌های اجباری
-REQUIRED_CHANNELS = [
-    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
-]
-
-# تنظیمات اینستاگرام
+REQUIRED_CHANNELS = [{"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}]
 INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME', 'etehadtaskforce')
 INSTAGRAM_PASSWORD = os.getenv('INSTAGRAM_PASSWORD', 'Aa123456*')
 SESSION_FILE = "session.json"
 
-# راه‌اندازی وب‌سرور Flask برای پینگ
+# راه‌اندازی وب‌سرور Flask
 app = Flask(__name__)
 
 @app.route('/')
 def ping():
     return "Bot is alive!", 200
 
-# تغییر در تابع run_flask
-def run_flask():
-    print("Starting Flask server for 24/7 activity...")
-    port = int(os.environ.get("PORT", 8080))  # پورت پیش‌فرض Render
-    
-    # اطمینان از استفاده از پورت متفاوت برای Flask و تلگرام
-    if port == int(os.environ.get("PORT", 8443)):
-        port = port + 1
-    
-    app.run(host='0.0.0.0', port=port, debug=False)  # استفاده از پورت محیطی
+# تابع اجرای Flask
+def run_flask(port):
+    print(f"Starting Flask server on port {port} for 24/7 activity...")
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 # راه‌اندازی پایگاه داده
 db.initialize_db()
@@ -707,26 +693,34 @@ def main():
     dispatcher = updater.dispatcher
     job_queue = updater.job_queue
     job_queue.run_repeating(periodic_backup, interval=3600, first=300)
+
     # هندلرها
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(MessageHandler(Filters.regex(r'^@[\w.]+$'), handle_username))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))  # فقط پیام‌های متنی
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
     dispatcher.add_handler(CommandHandler("admin", admin))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
     dispatcher.add_handler(CallbackQueryHandler(admin_button_handler))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
+    # دریافت پورت از متغیر محیطی
+    PORT = int(os.environ.get("PORT", 10000))  # پورت پیش‌فرض 10000 برای سازگاری با سرور
+
+    # اجرای چک کردن دایرکت‌ها در ترد جداگانه
     threading.Thread(target=check_instagram_dms, args=(updater.dispatcher,), daemon=True).start()
-    
-    # اجرای Flask در ترد جداگانه
-    threading.Thread(target=run_flask, daemon=True).start()
-    
-    # استفاده از start_webhook به جای start_polling برای جلوگیری از تداخل
-    PORT = int(os.environ.get("PORT", 8443))
-    
-    updater.start_polling(drop_pending_updates=True)
-    print("Bot started with polling")
-    
+
+    # اجرای Flask در پورت مشخص‌شده
+    threading.Thread(target=run_flask, args=(PORT,), daemon=True).start()
+
+    # تنظیم Webhook برای تلگرام
+    WEBHOOK_URL = f"https://insta-zpnb.onrender.com/{TOKEN}"  # جایگزین با URL واقعی اپلیکیشن شما
+    updater.start_webhook(listen="0.0.0.0",
+                          port=PORT,
+                          url_path=TOKEN,
+                          webhook_url=WEBHOOK_URL)
+    updater.bot.set_webhook(WEBHOOK_URL)
+
+    print(f"Bot started with webhook on port {PORT}")
     updater.idle()
 
 if __name__ == "__main__":
