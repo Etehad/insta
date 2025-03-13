@@ -8,7 +8,6 @@ import threading
 from datetime import datetime
 import uuid
 
-# تلاش برای نصب Pillow اگر وجود ندارد
 try:
     from PIL import Image
 except ImportError:
@@ -41,7 +40,7 @@ REQUIRED_CHANNELS = [{"chat_id": "-1001860545237", "username": "@task_1_4_1_forc
 INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME', 'etehadtaskforce')
 INSTAGRAM_PASSWORD = os.getenv('INSTAGRAM_PASSWORD', 'Aa123456*')
 SESSION_FILE = "session.json"
-PROXY = os.getenv('INSTAGRAM_PROXY', None)  # پروکسی را از متغیر محیطی بخوانید (اختیاری)
+PROXY = os.getenv('INSTAGRAM_PROXY', None)
 
 # راه‌اندازی Flask
 app = Flask(__name__)
@@ -89,7 +88,6 @@ except Exception as e:
     logger.error(f"ورود به اینستاگرام ناموفق بود: {str(e)}")
     exit(1)
 
-# مسیر Webhook
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     update = Update.de_json(json.loads(request.get_data().decode('utf-8')), updater.bot)
@@ -100,7 +98,6 @@ def webhook():
 def ping():
     return "Bot is alive!", 200
 
-# هندلرها
 def setup_handlers(dp):
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(Filters.regex(r'^@[\w.]+$'), handle_username))
@@ -225,7 +222,7 @@ def process_and_send_post(media_id, chat_id, context):
         except Exception as e:
             logger.error(f"خطا در دانلود (تلاش {attempt + 1}/{retries}): {str(e)}")
             if "401 Unauthorized" in str(e):
-                time.sleep(60)  # صبر در صورت خطای 401
+                time.sleep(60)
             if attempt == retries - 1:
                 context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود پس از {retries} تلاش: {str(e)}")
 
@@ -314,10 +311,26 @@ def check_instagram_dms(context):
             time.sleep(60)
         time.sleep(10)
 
+def admin(update: Update, context):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        update.message.reply_text("شما دسترسی به این بخش را ندارید!")
+        return
+    keyboard = [
+        [InlineKeyboardButton("مشاهده کاربران", callback_data="view_users")],
+        [InlineKeyboardButton("ارسال پیام همگانی", callback_data="broadcast")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text("پنل ادمین:\nلطفاً گزینه مورد نظر را انتخاب کنید:", reply_markup=reply_markup)
+
+def admin_button_handler(update: Update, context):
+    query = update.callback_query
+    query.answer()
+    $
+
 def main():
     logger.info("Bot is starting...")
-    db.initialize_db()
-    db.restore_database()
+    db.initialize_db()  # فقط مقداردهی اولیه دیتابیس
     setup_handlers(dispatcher)
     threading.Thread(target=check_instagram_dms, args=(dispatcher,), daemon=True).start()
     PORT = int(os.environ.get("PORT", 10000))
