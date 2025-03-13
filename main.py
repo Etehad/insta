@@ -482,15 +482,36 @@ def check_instagram_dms(context):
                             telegram_id = db.get_telegram_id_by_token(text)
                             if telegram_id:
                                 print(f"توکن معتبر پیدا شد: {text}, telegram_id: {telegram_id}")
-                                ig_client.direct_send(
-                                    "توکن شما تأیید شد. از این پس هر پست و استوری که در دایرکت Share کنید در تلگرام دریافت می‌کنید.",
-                                    user_ids=[sender_id]
-                                )
-                                context.bot.send_message(chat_id=telegram_id, text="پیج اینستاگرام شما متصل شد.")
+                                
+                                # دریافت اطلاعات تلگرام
+                                try:
+                                    telegram_user = context.bot.get_chat(telegram_id)
+                                    telegram_username = telegram_user.username or str(telegram_id)
+                                    
+                                    # ارسال پیام به اینستاگرام با لینک به تلگرام
+                                    ig_client.direct_send(
+                                        f"توکن شما تأیید شد. پیج شما به [اکانت تلگرام](https://t.me/{telegram_username}) شما متصل شد.",
+                                        user_ids=[sender_id]
+                                    )
+                                except Exception as e:
+                                    print(f"خطا در دریافت اطلاعات تلگرام: {str(e)}")
+                                    ig_client.direct_send(
+                                        "توکن شما تأیید شد. از این پس هر پست و استوری که در دایرکت Share کنید در تلگرام دریافت می‌کنید.",
+                                        user_ids=[sender_id]
+                                    )
+                                
+                                # ارسال پیام به تلگرام
                                 sender_info = ig_client.user_info(sender_id)
                                 instagram_username = sender_info.username
                                 print(f"ثبت instagram_username: {instagram_username} برای telegram_id: {telegram_id}")
                                 db.update_instagram_username(telegram_id, instagram_username)
+                                
+                                # ارسال پیام به تلگرام با لینک به اینستاگرام
+                                context.bot.send_message(
+                                    chat_id=telegram_id, 
+                                    text=f"اکانت شما به [پیج اینستاگرام](https://www.instagram.com/{instagram_username}) متصل شد.",
+                                    parse_mode="Markdown"
+                                )
                             else:
                                 print(f"توکن نامعتبر: {text}")
                                 ig_client.direct_send(
@@ -512,9 +533,14 @@ def check_instagram_dms(context):
                                     target=process_and_send_post,
                                     args=(media_id, telegram_id, context)
                                 ).start()
-                                ig_client.direct(
-                                    "پست/کلیپ Share شده شما دریافت شد و در حال پردازش است.",
+                                ig_client.direct_send(
+                                    "محتوای شما دریافت و در حال پردازش است.",
                                     user_ids=[sender_id]
+                                )
+                                # اطلاع به کاربر تلگرام
+                                context.bot.send_message(
+                                    chat_id=telegram_id, 
+                                    text="محتوای شما دریافت و در حال پردازش است."
                                 )
                             else:
                                 print(f"کاربر پیدا نشد: instagram_username: {instagram_username}")
@@ -536,8 +562,13 @@ def check_instagram_dms(context):
                                     args=(message.story_share.id, telegram_id, context)
                                 ).start()
                                 ig_client.direct_send(
-                                    "استوری Share شده شما دریافت شد و در حال پردازش است.",
+                                    "محتوای شما دریافت و در حال پردازش است.",
                                     user_ids=[sender_id]
+                                )
+                                # اطلاع به کاربر تلگرام
+                                context.bot.send_message(
+                                    chat_id=telegram_id, 
+                                    text="محتوای شما دریافت و در حال پردازش است."
                                 )
                             else:
                                 print(f"کاربر پیدا نشد: instagram_username: {instagram_username}")
@@ -548,8 +579,8 @@ def check_instagram_dms(context):
 
         except Exception as e:
             print(f"خطا در چک کردن دایرکت‌ها: {str(e)}")
-        time.sleep(10)
-
+        time.sleep(10)  # چک کردن هر 10 ثانیه
+        
 # تابع دریافت لینک مستقیم
 def handle_link(update: Update, context):
     chat_id = update.effective_chat.id  # دریافت chat_id (گروه یا خصوصی)
