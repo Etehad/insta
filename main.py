@@ -724,8 +724,8 @@ def main():
     # استفاده از start_webhook به جای start_polling برای جلوگیری از تداخل
     PORT = int(os.environ.get("PORT", 8443))
     
-        updater.start_polling(drop_pending_updates=True)
-        print("Bot started with polling")
+    updater.start_polling(drop_pending_updates=True)
+    print("Bot started with polling")
     
     updater.idle()
 
