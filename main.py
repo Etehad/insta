@@ -326,11 +326,39 @@ def admin(update: Update, context):
 def admin_button_handler(update: Update, context):
     query = update.callback_query
     query.answer()
-    $
+    user_id = query.from_user.id
+    if user_id != ADMIN_ID:
+        query.edit_message_text("شما دسترسی به این بخش را ندارید!")
+        return
+    
+    if query.data == "view_users":
+        users = []
+        with open(db.DB_FILE, "r") as f:
+            db_data = json.load(f)
+        for user_id, data in db_data["users"].items():
+            users.append(f"ID: {data['telegram_id']}, Instagram: {data.get('instagram_username', 'N/A')}")
+        if users:
+            user_list = "\n".join(users)
+            query.edit_message_text(f"لیست کاربران:\n{user_list}")
+        else:
+            query.edit_message_text("هیچ کاربری ثبت نشده است.")
+    
+    elif query.data == "broadcast":
+        query.edit_message_text("لطفاً متن پیام همگانی را ارسال کنید.")
+        context.user_data['state'] = 'awaiting_broadcast'
+
+def handle_username(update: Update, context):
+    message_text = update.message.text
+    if message_text.startswith('@'):
+        username = message_text[1:]
+        chat_id = update.effective_chat.id
+        # اینجا باید تابع process_and_send_profile را اضافه کنید اگر نیاز دارید
+        return True
+    return False
 
 def main():
     logger.info("Bot is starting...")
-    db.initialize_db()  # فقط مقداردهی اولیه دیتابیس
+    db.initialize_db()
     setup_handlers(dispatcher)
     threading.Thread(target=check_instagram_dms, args=(dispatcher,), daemon=True).start()
     PORT = int(os.environ.get("PORT", 10000))
