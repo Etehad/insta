@@ -1,6 +1,6 @@
 import os
 import sys
-
+import json
 # تلاش برای نصب Pillow اگر وجود ندارد
 try:
     from PIL import Image
