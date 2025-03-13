@@ -232,8 +232,6 @@ def check_membership(update: Update, context) -> bool:
 
 def periodic_backup(context):
     db.backup_database()
-    job_queue = updater.job_queue
-job_queue.run_repeating(periodic_backup, interval=3600, first=300)
 
 # تابع دانلود و ارسال پست
 def process_and_send_post(media_id, chat_id, context):
@@ -702,7 +700,8 @@ def main():
     print("Bot is starting...")
     updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
-
+    job_queue = updater.job_queue
+    job_queue.run_repeating(periodic_backup, interval=3600, first=300)
     # هندلرها
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(MessageHandler(Filters.regex(r'^@[\w.]+$'), handle_username))
