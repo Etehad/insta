@@ -723,19 +723,7 @@ def main():
     
     # استفاده از start_webhook به جای start_polling برای جلوگیری از تداخل
     PORT = int(os.environ.get("PORT", 8443))
-    WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
     
-    if WEBHOOK_URL:
-        # اگر آدرس webhook تعریف شده باشد، از webhook استفاده کن
-        updater.start_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path=TOKEN,
-            webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
-        )
-        print(f"Bot started with webhook on port {PORT}")
-    else:
-        # در غیر این صورت از polling استفاده کن
         updater.start_polling(drop_pending_updates=True)
         print("Bot started with polling")
     
