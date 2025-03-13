@@ -54,10 +54,11 @@ def login_with_session():
         if os.path.exists(SESSION_FILE):
             logger.info(f"بارگذاری session از {SESSION_FILE}")
             ig_client.load_settings(SESSION_FILE)
-            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)  # تأیید session
             logger.info(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) با session وارد شد.")
         else:
-            logger.info(f"در حال ورود به اینستاگرام با نام کاربری: {INSTAGRAM_USERNAME}")
+            logger.info(f"فایل {SESSION_FILE} وجود ندارد. در حال ورود به اینستاگرام...")
+            ig_client.delay_range = [5, 10]  # تأخیر برای کاهش فشار به سرور
             ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
             logger.info(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد.")
             ig_client.dump_settings(SESSION_FILE)
@@ -468,7 +469,7 @@ def handle_story_link(story_url, chat_id, context):
         context.bot.send_message(chat_id=chat_id, text=f"خطا در پردازش لینک استوری: {str(e)}")
         return False
 
-# تابع چک کردن دایرکت‌ها با لاگ‌گیری بهبودیافته
+# تابع چک کردن دایرکت‌ها با مدیریت ورود مجدد
 def check_instagram_dms(context):
     logger.info("شروع ترد چک کردن دایرکت‌ها")
     while True:
@@ -559,6 +560,13 @@ def check_instagram_dms(context):
                                     "لطفاً ابتدا توکن خود را در دایرکت ارسال کنید تا اکانت شما متصل شود. برای دریافت توکن، در تلگرام دستور /start را ارسال کنید.",
                                     user_ids=[sender_id]
                                 )
+        except LoginRequired as e:
+            logger.error(f"Session نامعتبر شد: {str(e)}. تلاش برای ورود مجدد...")
+            try:
+                login_with_session()  # تلاش برای ورود مجدد
+            except Exception as login_error:
+                logger.error(f"ورود مجدد ناموفق بود: {str(login_error)}. منتظر 5 دقیقه...")
+                time.sleep(300)  # در صورت شکست ورود، 5 دقیقه صبر کن
         except Exception as e:
             logger.error(f"خطا در چک کردن دایرکت‌ها: {str(e)}")
             time.sleep(60)  # در صورت خطا، 60 ثانیه صبر کن و دوباره تلاش کن
