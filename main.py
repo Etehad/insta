@@ -22,7 +22,7 @@ import database as db
 import threading
 import time
 import re
-from flask import Flask
+from flask import Flask, request
 from datetime import datetime
 
 # توکن ربات تلگرام
