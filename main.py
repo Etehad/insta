@@ -33,23 +33,12 @@ INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME', 'etehadtaskforce')
 INSTAGRAM_PASSWORD = os.getenv('INSTAGRAM_PASSWORD', 'Aa123456*')
 SESSION_FILE = "session.json"
 
-# راه‌اندازی وب‌سرور Flask
+# راه‌اندازی Flask
 app = Flask(__name__)
+updater = Updater(TOKEN, use_context=True)
+dispatcher = updater.dispatcher
 
-@app.route('/')
-def ping():
-    return "Bot is alive!", 200
-
-# تابع اجرای Flask
-def run_flask(port):
-    print(f"Starting Flask server on port {port} for 24/7 activity...")
-    app.run(host='0.0.0.0', port=port, debug=False)
-
-# راه‌اندازی پایگاه داده
-db.initialize_db()
-db.restore_database()
-
-# ورود به اینستاگرام
+# تنظیمات اینستاگرام
 ig_client = Client()
 
 def login_with_session():
@@ -73,7 +62,6 @@ def login_with_session():
             ig_client.two_factor_login(two_factor_code)
             print(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد (با 2FA).")
             ig_client.dump_settings(SESSION_FILE)
-            print(f"session با موفقیت در {SESSION_FILE} ذخیره شد.")
         else:
             raise Exception("کد 2FA توی متغیر محیطی تنظیم نشده!")
     except ClientError as e:
@@ -88,6 +76,27 @@ try:
 except Exception as e:
     print(f"ورود به اینستاگرام ناموفق بود: {str(e)}")
     exit(1)
+
+# مسیر Webhook در Flask
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    update = Update.de_json(json.loads(request.get_data().decode('utf-8')), updater.bot)
+    dispatcher.process_update(update)
+    return '', 200
+
+@app.route('/')
+def ping():
+    return "Bot is alive!", 200
+
+# هندلرها
+def setup_handlers(dp):
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.regex(r'^@[\w.]+$'), handle_username))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
+    dp.add_handler(CommandHandler("admin", admin))
+    dp.add_handler(CallbackQueryHandler(button_handler))
+    dp.add_handler(CallbackQueryHandler(admin_button_handler))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
 # تابع خوش‌آمدگویی
 def start(update: Update, context):
@@ -689,39 +698,25 @@ def debug_handler(update: Update, context):
 # تغییر در تابع main
 def main():
     print("Bot is starting...")
-    updater = Updater(TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
-    job_queue = updater.job_queue
-    job_queue.run_repeating(periodic_backup, interval=3600, first=300)
+    
+    # راه‌اندازی پایگاه داده
+    db.initialize_db()
+    db.restore_database()
 
-    # هندلرها
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(MessageHandler(Filters.regex(r'^@[\w.]+$'), handle_username))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
-    dispatcher.add_handler(CommandHandler("admin", admin))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
-    dispatcher.add_handler(CallbackQueryHandler(admin_button_handler))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-
-    # دریافت پورت از متغیر محیطی
-    PORT = int(os.environ.get("PORT", 10000))  # پورت پیش‌فرض 10000 برای سازگاری با سرور
+    # تنظیم هندلرها
+    setup_handlers(dispatcher)
 
     # اجرای چک کردن دایرکت‌ها در ترد جداگانه
-    threading.Thread(target=check_instagram_dms, args=(updater.dispatcher,), daemon=True).start()
+    threading.Thread(target=check_instagram_dms, args=(dispatcher,), daemon=True).start()
 
-    # اجرای Flask در پورت مشخص‌شده
-    threading.Thread(target=run_flask, args=(PORT,), daemon=True).start()
-
-    # تنظیم Webhook برای تلگرام
+    # تنظیم Webhook
+    PORT = int(os.environ.get("PORT", 10000))
     WEBHOOK_URL = f"https://insta-zpnb.onrender.com/{TOKEN}"  # جایگزین با URL واقعی اپلیکیشن شما
-    updater.start_webhook(listen="0.0.0.0",
-                          port=PORT,
-                          url_path=TOKEN,
-                          webhook_url=WEBHOOK_URL)
     updater.bot.set_webhook(WEBHOOK_URL)
 
-    print(f"Bot started with webhook on port {PORT}")
-    updater.idle()
+    # اجرای Flask
+    print(f"Starting Flask server on port {PORT}...")
+    app.run(host='0.0.0.0', port=PORT, debug=False)
 
 if __name__ == "__main__":
     main()
