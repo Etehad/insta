@@ -25,6 +25,13 @@ import re
 from flask import Flask, request
 from datetime import datetime
 
+# تنظیم لاگ‌گیری
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 # توکن ربات تلگرام
 TOKEN = os.getenv('TOKEN', '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU')
 ADMIN_ID = 6473845417
@@ -44,37 +51,37 @@ ig_client = Client()
 def login_with_session():
     try:
         if os.path.exists(SESSION_FILE):
-            print(f"بارگذاری session از {SESSION_FILE}")
+            logger.info(f"بارگذاری session از {SESSION_FILE}")
             ig_client.load_settings(SESSION_FILE)
             ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            print(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) با session وارد شد.")
+            logger.info(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) با session وارد شد.")
         else:
-            print(f"در حال ورود به اینستاگرام با نام کاربری: {INSTAGRAM_USERNAME}")
+            logger.info(f"در حال ورود به اینستاگرام با نام کاربری: {INSTAGRAM_USERNAME}")
             ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            print(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد.")
+            logger.info(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد.")
             ig_client.dump_settings(SESSION_FILE)
-            print(f"session با موفقیت در {SESSION_FILE} ذخیره شد.")
+            logger.info(f"session با موفقیت در {SESSION_FILE} ذخیره شد.")
     except TwoFactorRequired as e:
-        print("احراز هویت دو مرحله‌ای مورد نیاز است!")
+        logger.error("احراز هویت دو مرحله‌ای مورد نیاز است!")
         two_factor_code = os.getenv('TWO_FACTOR_CODE')
         if two_factor_code:
-            print(f"استفاده از کد 2FA از متغیر محیطی: {two_factor_code}")
+            logger.info(f"استفاده از کد 2FA از متغیر محیطی: {two_factor_code}")
             ig_client.two_factor_login(two_factor_code)
-            print(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد (با 2FA).")
+            logger.info(f"با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد (با 2FA).")
             ig_client.dump_settings(SESSION_FILE)
         else:
             raise Exception("کد 2FA توی متغیر محیطی تنظیم نشده!")
     except ClientError as e:
-        print(f"خطا در ورود به اینستاگرام: {str(e)}")
+        logger.error(f"خطا در ورود به اینستاگرام: {str(e)}")
         raise
     except Exception as e:
-        print(f"خطای غیرمنتظره در ورود: {str(e)}")
+        logger.error(f"خطای غیرمنتظره در ورود: {str(e)}")
         raise
 
 try:
     login_with_session()
 except Exception as e:
-    print(f"ورود به اینستاگرام ناموفق بود: {str(e)}")
+    logger.error(f"ورود به اینستاگرام ناموفق بود: {str(e)}")
     exit(1)
 
 # مسیر Webhook در Flask
@@ -460,58 +467,51 @@ def handle_story_link(story_url, chat_id, context):
         context.bot.send_message(chat_id=chat_id, text=f"خطا در پردازش لینک استوری: {str(e)}")
         return False
 
-# تابع چک کردن دایرکت‌ها
+# تابع چک کردن دایرکت‌ها با لاگ‌گیری بهبودیافته
 def check_instagram_dms(context):
+    logger.info("شروع ترد چک کردن دایرکت‌ها")
     while True:
         try:
-            print("چک کردن دایرکت‌ها...")
+            logger.info("چک کردن دایرکت‌ها...")
             inbox = ig_client.direct_threads(amount=50)
-            print(f"تعداد دایرکت‌ها: {len(inbox)}")
+            logger.info(f"تعداد دایرکت‌ها: {len(inbox)}")
             for thread in inbox:
                 for message in thread.messages:
                     if not db.is_message_processed(message.id):
                         sender_id = message.user_id
-                        print(f"پیام جدید پیدا شد: نوع پیام: {message.item_type}, از کاربر: {sender_id}")
+                        logger.info(f"پیام جدید پیدا شد: نوع پیام: {message.item_type}, از کاربر: {sender_id}")
                         db.mark_message_processed(message.id)
 
                         if message.item_type == "text":
                             text = message.text
-                            print(f"پیام متنی دریافت شد: {text}")
+                            logger.info(f"پیام متنی دریافت شد: {text}")
                             telegram_id = db.get_telegram_id_by_token(text)
                             if telegram_id:
-                                print(f"توکن معتبر پیدا شد: {text}, telegram_id: {telegram_id}")
-                                
-                                # دریافت اطلاعات تلگرام
+                                logger.info(f"توکن معتبر پیدا شد: {text}, telegram_id: {telegram_id}")
                                 try:
                                     telegram_user = context.bot.get_chat(telegram_id)
                                     telegram_username = telegram_user.username or str(telegram_id)
-                                    
-                                    # ارسال پیام به اینستاگرام با لینک به تلگرام
                                     ig_client.direct_send(
                                         f"توکن شما تأیید شد. پیج شما به [اکانت تلگرام](https://t.me/{telegram_username}) شما متصل شد.",
                                         user_ids=[sender_id]
                                     )
                                 except Exception as e:
-                                    print(f"خطا در دریافت اطلاعات تلگرام: {str(e)}")
+                                    logger.error(f"خطا در دریافت اطلاعات تلگرام: {str(e)}")
                                     ig_client.direct_send(
                                         "توکن شما تأیید شد. از این پس هر پست و استوری که در دایرکت Share کنید در تلگرام دریافت می‌کنید.",
                                         user_ids=[sender_id]
                                     )
-                                
-                                # ارسال پیام به تلگرام
                                 sender_info = ig_client.user_info(sender_id)
                                 instagram_username = sender_info.username
-                                print(f"ثبت instagram_username: {instagram_username} برای telegram_id: {telegram_id}")
+                                logger.info(f"ثبت instagram_username: {instagram_username} برای telegram_id: {telegram_id}")
                                 db.update_instagram_username(telegram_id, instagram_username)
-                                
-                                # ارسال پیام به تلگرام با لینک به اینستاگرام
                                 context.bot.send_message(
-                                    chat_id=telegram_id, 
+                                    chat_id=telegram_id,
                                     text=f"اکانت شما به [پیج اینستاگرام](https://www.instagram.com/{instagram_username}) متصل شد.",
                                     parse_mode="Markdown"
                                 )
                             else:
-                                print(f"توکن نامعتبر: {text}")
+                                logger.info(f"توکن نامعتبر: {text}")
                                 ig_client.direct_send(
                                     "توکن شما نامعتبر است. لطفاً در تلگرام با دستور /start توکن جدید دریافت کنید و دوباره ارسال کنید.",
                                     user_ids=[sender_id]
@@ -519,64 +519,48 @@ def check_instagram_dms(context):
                             continue
 
                         if message.item_type in ["media_share", "clip"]:
-                            print(f"پست/کلیپ Share شده پیدا شد: media_id: {message.media_share.id if message.item_type == 'media_share' else message.clip.id}")
+                            logger.info(f"پست/کلیپ Share شده پیدا شد: media_id: {message.media_share.id if message.item_type == 'media_share' else message.clip.id}")
                             sender_info = ig_client.user_info(sender_id)
                             instagram_username = sender_info.username
-                            print(f"تلاش برای پیدا کردن telegram_id برای instagram_username: {instagram_username}")
                             telegram_id = db.get_telegram_id_by_instagram_username(instagram_username)
                             if telegram_id:
-                                print(f"کاربر تأیید شده: instagram_username: {instagram_username}, telegram_id: {telegram_id}")
+                                logger.info(f"کاربر تأیید شده: instagram_username: {instagram_username}, telegram_id: {telegram_id}")
                                 media_id = message.media_share.id if message.item_type == 'media_share' else message.clip.id
                                 threading.Thread(
                                     target=process_and_send_post,
                                     args=(media_id, telegram_id, context)
                                 ).start()
-                                ig_client.direct_send(
-                                    "محتوای شما دریافت و در حال پردازش است.",
-                                    user_ids=[sender_id]
-                                )
-                                # اطلاع به کاربر تلگرام
-                                context.bot.send_message(
-                                    chat_id=telegram_id, 
-                                    text="محتوای شما دریافت و در حال پردازش است."
-                                )
+                                ig_client.direct_send("محتوای شما دریافت و در حال پردازش است.", user_ids=[sender_id])
+                                context.bot.send_message(chat_id=telegram_id, text="محتوای شما دریافت و در حال پردازش است.")
                             else:
-                                print(f"کاربر پیدا نشد: instagram_username: {instagram_username}")
+                                logger.info(f"کاربر پیدا نشد: instagram_username: {instagram_username}")
                                 ig_client.direct_send(
                                     "لطفاً ابتدا توکن خود را در دایرکت ارسال کنید تا اکانت شما متصل شود. برای دریافت توکن، در تلگرام دستور /start را ارسال کنید.",
                                     user_ids=[sender_id]
                                 )
 
                         if message.item_type == "story_share":
-                            print(f"استوری Share شده پیدا شد: story_id: {message.story_share.id}")
+                            logger.info(f"استوری Share شده پیدا شد: story_id: {message.story_share.id}")
                             sender_info = ig_client.user_info(sender_id)
                             instagram_username = sender_info.username
-                            print(f"تلاش برای پیدا کردن telegram_id برای instagram_username: {instagram_username}")
                             telegram_id = db.get_telegram_id_by_instagram_username(instagram_username)
                             if telegram_id:
-                                print(f"کاربر تأیید شده: instagram_username: {instagram_username}, telegram_id: {telegram_id}")
+                                logger.info(f"کاربر تأیید شده: instagram_username: {instagram_username}, telegram_id: {telegram_id}")
                                 threading.Thread(
                                     target=process_and_send_story,
                                     args=(message.story_share.id, telegram_id, context)
                                 ).start()
-                                ig_client.direct_send(
-                                    "محتوای شما دریافت و در حال پردازش است.",
-                                    user_ids=[sender_id]
-                                )
-                                # اطلاع به کاربر تلگرام
-                                context.bot.send_message(
-                                    chat_id=telegram_id, 
-                                    text="محتوای شما دریافت و در حال پردازش است."
-                                )
+                                ig_client.direct_send("محتوای شما دریافت و در حال پردازش است.", user_ids=[sender_id])
+                                context.bot.send_message(chat_id=telegram_id, text="محتوای شما دریافت و در حال پردازش است.")
                             else:
-                                print(f"کاربر پیدا نشد: instagram_username: {instagram_username}")
+                                logger.info(f"کاربر پیدا نشد: instagram_username: {instagram_username}")
                                 ig_client.direct_send(
                                     "لطفاً ابتدا توکن خود را در دایرکت ارسال کنید تا اکانت شما متصل شود. برای دریافت توکن، در تلگرام دستور /start را ارسال کنید.",
                                     user_ids=[sender_id]
                                 )
-
         except Exception as e:
-            print(f"خطا در چک کردن دایرکت‌ها: {str(e)}")
+            logger.error(f"خطا در چک کردن دایرکت‌ها: {str(e)}")
+            time.sleep(60)  # در صورت خطا، 60 ثانیه صبر کن و دوباره تلاش کن
         time.sleep(10)  # چک کردن هر 10 ثانیه
         
 # تابع دریافت لینک مستقیم
@@ -707,6 +691,7 @@ def main():
     setup_handlers(dispatcher)
 
     # اجرای چک کردن دایرکت‌ها در ترد جداگانه
+    logger.info("راه‌اندازی ترد چک کردن دایرکت‌ها...")
     threading.Thread(target=check_instagram_dms, args=(dispatcher,), daemon=True).start()
 
     # تنظیم Webhook
