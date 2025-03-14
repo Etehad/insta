@@ -105,9 +105,6 @@ def process_and_send_instagram_post(shortcode, chat_id, context):
                 context.bot.send_photo(chat_id=chat_id, photo=f, caption=post.caption or "[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
         os.remove(file_path)
         context.bot.send_message(chat_id=chat_id, text="پست اینستاگرام با موفقیت ارسال شد.")
-    except Exception as e:
-        logger.error(f"خطا در دانلود پست اینستاگرام: {str(e)}")
-        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود پست اینستاگرام: {str(e)}")
 
 # تابع مدیریت لینک‌ها
 def handle_link(update: Update, context):
