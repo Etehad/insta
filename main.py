@@ -23,7 +23,7 @@ TOKEN = os.getenv('TOKEN', '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU')
 ADMIN_ID = 6473845417
 REQUIRED_CHANNELS = [{"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}]
 
-# راه‌اندازی Flask برای پینگ
+# راه‌اندازی Flask
 app = Flask(__name__)
 
 @app.route('/')
@@ -42,7 +42,7 @@ def start(update: Update, context):
         "سلام! لینک ویدیو رو از اینستاگرام، یوتیوب، تیک‌تاک یا فیسبوک بفرستید تا براتون دانلود کنم."
     )
 
-# تابع بررسی عضویت
+# تابع بررسی عضویت (فقط برای چت خصوصی)
 def check_membership(update: Update, context):
     user_id = update.effective_user.id
     not_joined = []
@@ -62,55 +62,79 @@ def check_membership(update: Update, context):
 
 # تابع دانلود و ارسال ویدیو (یوتیوب، تیک‌تاک، فیسبوک)
 def process_and_send_video(url, chat_id, context):
-    ydl_opts = {'format': 'best', 'outtmpl': 'downloads/%(id)s.%(ext)s', 'quiet': True}
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        video_url = info['url']
-        title = info.get('title', 'بدون عنوان')
-        thumbnail_url = info.get('thumbnail')
+    try:
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': 'downloads/%(id)s.%(ext)s',
+            'quiet': True,
+            'no_warnings': True,
+        }
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            video_url = info['url']
+            title = info.get('title', 'بدون عنوان')
+            thumbnail_url = info.get('thumbnail', None)
 
-    # دانلود و ارسال ویدیو
-    video_path = f"downloads/{info['id']}.{info['ext']}"
-    with requests.get(video_url, stream=True) as r:
-        with open(video_path, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-    with open(video_path, 'rb') as f:
-        context.bot.send_video(chat_id=chat_id, video=f, caption=f"{title}\n[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
-    os.remove(video_path)
-
-    # ارسال کاور
-    if thumbnail_url:
-        thumbnail_path = f"downloads/{info['id']}_thumbnail.jpg"
-        with requests.get(thumbnail_url, stream=True) as r:
-            with open(thumbnail_path, 'wb') as f:
+        video_path = f"downloads/{info['id']}.{info['ext']}"
+        with requests.get(video_url, stream=True) as r:
+            r.raise_for_status()
+            with open(video_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-        with open(thumbnail_path, 'rb') as f:
-            context.bot.send_photo(chat_id=chat_id, photo=f, caption=f"کاور ویدیو\n[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
-        os.remove(thumbnail_path)
+
+        with open(video_path, 'rb') as f:
+            context.bot.send_video(chat_id=chat_id, video=f, caption=f"{title}\n[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
+        os.remove(video_path)
+
+        if thumbnail_url:
+            thumbnail_path = f"downloads/{info['id']}_thumbnail.jpg"
+            with requests.get(thumbnail_url, stream=True) as r:
+                r.raise_for_status()
+                with open(thumbnail_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            with open(thumbnail_path, 'rb') as f:
+                context.bot.send_photo(chat_id=chat_id, photo=f, caption=f"کاور ویدیو\n[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
+            os.remove(thumbnail_path)
+
+        context.bot.send_message(chat_id=chat_id, text="ویدیو با موفقیت ارسال شد.")
+    except Exception as e:
+        logger.error(f"خطا در دانلود ویدیو: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود ویدیو: {str(e)}")
 
 # تابع دانلود و ارسال پست اینستاگرام
 def process_and_send_instagram_post(shortcode, chat_id, context):
-    L = Instaloader()
-    post = Post.from_shortcode(L.context, shortcode)
-    L.download_post(post, target="downloads")
-    for file in os.listdir("downloads"):
-        file_path = os.path.join("downloads", file)
-        if file.endswith(".mp4"):
-            with open(file_path, 'rb') as f:
-                context.bot.send_video(chat_id=chat_id, video=f, caption="[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
-        elif file.endswith((".jpg", ".jpeg", ".png")):
-            with open(file_path, 'rb') as f:
-                context.bot.send_photo(chat_id=chat_id, photo=f, caption=post.caption or "[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
-        os.remove(file_path)
+    try:
+        L = Instaloader()
+        post = Post.from_shortcode(L.context, shortcode)
+        L.download_post(post, target="downloads")
+
+        downloaded_files = os.listdir("downloads")
+        for file in downloaded_files:
+            file_path = os.path.join("downloads", file)
+            if file.endswith(".mp4"):
+                with open(file_path, 'rb') as f:
+                    context.bot.send_video(chat_id=chat_id, video=f, caption="[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
+            elif file.endswith((".jpg", ".jpeg", ".png")):
+                with open(file_path, 'rb') as f:
+                    context.bot.send_photo(chat_id=chat_id, photo=f, caption=post.caption or "[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
+            os.remove(file_path)
         context.bot.send_message(chat_id=chat_id, text="پست اینستاگرام با موفقیت ارسال شد.")
+    except Exception as e:
+        logger.error(f"خطا در دانلود پست اینستاگرام: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود پست اینستاگرام: {str(e)}")
 
 # تابع مدیریت لینک‌ها
 def handle_link(update: Update, context):
     chat_id = update.effective_chat.id
     message_text = update.message.text
 
+    # الگوی تشخیص لینک
+    url_pattern = r'(https?://[^\s]+)'
+    if not re.search(url_pattern, message_text):
+        return  # اگر پیام لینک نداشته باشه، نادیده گرفته می‌شه
+
+    # چک کردن عضویت فقط در چت خصوصی
     if update.effective_chat.type == "private" and not check_membership(update, context):
         return
 
@@ -137,7 +161,9 @@ def main():
     updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
+    # هندلرها
     dispatcher.add_handler(CommandHandler("start", start))
+    # فقط پیام‌هایی که لینک دارن رو مدیریت کن
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
 
     threading.Thread(target=run_flask, daemon=True).start()
