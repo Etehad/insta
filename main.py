@@ -120,9 +120,6 @@ def download_video(url, update: Update, context):
             'format': 'best',
             'outtmpl': '%(title)s.%(ext)s',
             'quiet': True,
-            'cookiesfrombrowser': ('chrome',),  # استفاده از کوکی‌های کروم
-            'extract_flat': False,
-            'force_generic_extractor': False,
             'no_warnings': False,
             'verbose': True,
             'ignoreerrors': True,
@@ -145,6 +142,12 @@ def download_video(url, update: Update, context):
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': 'en-us,en;q=0.5',
                 'Sec-Fetch-Mode': 'navigate',
+            },
+            'extractor_args': {
+                'instagram': {
+                    'extract_media': True,
+                    'extract_media_type': 'video',
+                }
             }
         }
         
