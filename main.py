@@ -1,12 +1,23 @@
 import os
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.error import RetryAfter, TelegramError
 import yt_dlp
 import re
 import requests
 from bs4 import BeautifulSoup
 import sqlite3
 from flask import Flask
+import threading
+import time
+import logging
+
+# تنظیم لاگینگ
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # توکن ربات تلگرام
 TOKEN = os.getenv('TOKEN', '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU')
@@ -33,9 +44,21 @@ def run_flask():
     port = int(os.getenv("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
 
+# تابع ارسال پیام با مدیریت خطا
+def safe_send_message(context, chat_id, text, **kwargs):
+    try:
+        return context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
+    except RetryAfter as e:
+        logger.warning(f"RetryAfter error: {e}")
+        time.sleep(e.retry_after)
+        return safe_send_message(context, chat_id, text, **kwargs)
+    except TelegramError as e:
+        logger.error(f"Telegram error: {e}")
+        return None
+
 # تابع خوش‌آمدگویی
 def start(update: Update, context):
-    print(f"User {update.effective_user.id} started the bot")
+    logger.info(f"User {update.effective_user.id} started the bot")
     if not check_membership(update, context):
         return
 
@@ -45,7 +68,9 @@ def start(update: Update, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    update.message.reply_text(
+    safe_send_message(
+        context,
+        update.effective_chat.id,
         "سلام! به ربات دانلود ویدیو خوش آمدید.\n\n"
         "شما می‌توانید ویدیوهای زیر را دانلود کنید:\n"
         "📱 اینستاگرام\n"
@@ -68,7 +93,7 @@ def check_membership(update: Update, context) -> bool:
             if status not in ['member', 'administrator', 'creator']:
                 not_joined_channels.append(channel)
         except Exception as e:
-            print(f"خطا در بررسی عضویت کاربر {user_id} در کانال {channel['username']}: {str(e)}")
+            logger.error(f"خطا در بررسی عضویت کاربر {user_id} در کانال {channel['username']}: {str(e)}")
             not_joined_channels.append(channel)
 
     if not not_joined_channels:
@@ -79,7 +104,9 @@ def check_membership(update: Update, context) -> bool:
         keyboard.append([InlineKeyboardButton(text=f"عضویت در {channel['username']}", url=f"https://t.me/{channel['username'].replace('@', '')}")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text(
+    safe_send_message(
+        context,
+        update.effective_chat.id,
         "برای استفاده از ربات، لطفا در کانال‌های زیر عضو شوید و سپس دوباره امتحان کنید:",
         reply_markup=reply_markup
     )
@@ -88,7 +115,7 @@ def check_membership(update: Update, context) -> bool:
 # تابع دانلود ویدیو
 def download_video(url, update: Update, context):
     try:
-        update.message.reply_text("در حال دانلود ویدیو... لطفاً صبر کنید.")
+        safe_send_message(context, update.effective_chat.id, "در حال دانلود ویدیو... لطفاً صبر کنید.")
         
         ydl_opts = {
             'format': 'best',
@@ -101,20 +128,32 @@ def download_video(url, update: Update, context):
             video_path = f"{info['title']}.{info['ext']}"
             
             # ارسال ویدیو
-            with open(video_path, 'rb') as video_file:
-                context.bot.send_video(
-                    chat_id=update.effective_chat.id,
-                    video=video_file,
-                    caption=f"🎥 {info['title']}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                    parse_mode="Markdown"
-                )
+            try:
+                with open(video_path, 'rb') as video_file:
+                    context.bot.send_video(
+                        chat_id=update.effective_chat.id,
+                        video=video_file,
+                        caption=f"🎥 {info['title']}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
+                        parse_mode="Markdown"
+                    )
+            except RetryAfter as e:
+                logger.warning(f"RetryAfter error while sending video: {e}")
+                time.sleep(e.retry_after)
+                with open(video_path, 'rb') as video_file:
+                    context.bot.send_video(
+                        chat_id=update.effective_chat.id,
+                        video=video_file,
+                        caption=f"🎥 {info['title']}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
+                        parse_mode="Markdown"
+                    )
             
             # حذف فایل موقت
-            os.remove(video_path)
+            if os.path.exists(video_path):
+                os.remove(video_path)
             
     except Exception as e:
-        print(f"خطا در دانلود: {str(e)}")
-        update.message.reply_text(f"خطا در دانلود ویدیو: {str(e)}")
+        logger.error(f"خطا در دانلود: {str(e)}")
+        safe_send_message(context, update.effective_chat.id, f"خطا در دانلود ویدیو: {str(e)}")
 
 # تابع پردازش لینک
 def handle_link(update: Update, context):
@@ -122,13 +161,13 @@ def handle_link(update: Update, context):
         return
 
     url = update.message.text
-    print(f"Received URL: {url}")
+    logger.info(f"Received URL: {url}")
 
     # بررسی نوع لینک
     if any(domain in url.lower() for domain in ['instagram.com', 'youtube.com', 'youtu.be', 'tiktok.com', 'facebook.com', 'fb.watch']):
         threading.Thread(target=download_video, args=(url, update, context)).start()
     else:
-        update.message.reply_text("لطفاً یک لینک معتبر از اینستاگرام، یوتیوب، تیک تاک یا فیسبوک ارسال کنید.")
+        safe_send_message(context, update.effective_chat.id, "لطفاً یک لینک معتبر از اینستاگرام، یوتیوب، تیک تاک یا فیسبوک ارسال کنید.")
 
 # مدیریت دکمه‌ها
 def button_handler(update: Update, context):
@@ -156,7 +195,7 @@ def button_handler(update: Update, context):
 
 # تابع اصلی
 def main():
-    print("Bot is starting...")
+    logger.info("Bot is starting...")
     updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
@@ -165,12 +204,25 @@ def main():
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
+    # اضافه کردن error handler
+    dispatcher.add_error_handler(error_handler)
+
     updater.start_polling()
 
     # اجرای وب‌سرور Flask برای جلوگیری از خوابیدن
     threading.Thread(target=run_flask, daemon=False).start()
 
     updater.idle()
+
+# تابع مدیریت خطا
+def error_handler(update: Update, context):
+    logger.error(f"Update {update} caused error: {context.error}")
+    if update and update.effective_message:
+        safe_send_message(
+            context,
+            update.effective_chat.id,
+            "متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید."
+        )
 
 if __name__ == "__main__":
     main()
