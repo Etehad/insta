@@ -27,8 +27,7 @@ ADMIN_ID = 6473845417
 
 # تنظیم کانال‌های اجباری
 REQUIRED_CHANNELS = [
-    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"},
-    {"chat_id": "-1002301139625", "username": "@kingwor17172"}
+    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
 ]
 
 # راه‌اندازی وب‌سرور Flask برای فعال نگه داشتن
