@@ -1,6 +1,5 @@
 python-telegram-bot==13.15
-instaloader
-instagrapi
-Flask
-python-dotenv
+instaloader==4.14.1
+youtube-dl==2021.12.17
+requests==2.32.3
 pillow>=8.1.1
