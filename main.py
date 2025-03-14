@@ -399,6 +399,167 @@ def download_instagram_video(url, update: Update, context):
                     video_file = os.path.join(temp_dir, f"instagram_video_{post_id}.mp4")
                     download_success = False
                     
+                    # روش جدید: استخراج پیشرفته‌تر ویدیو
+                    if not download_success:
+                        try:
+                            logger.info("تلاش برای استخراج پیشرفته‌تر ویدیو...")
+                            
+                            # استفاده از الگوهای مختلف برای یافتن ویدیو
+                            patterns = [
+                                r'"video_url":"([^"]+)"',
+                                r'"video_versions":\[{"type":\d+,"width":\d+,"height":\d+,"url":"([^"]+)"',
+                                r'<meta property="og:video" content="([^"]+)"',
+                                r'<video[^>]+src="([^"]+)"',
+                                r'<source[^>]+src="([^"]+)"'
+                            ]
+                            
+                            # دریافت HTML صفحه با هدرهای مختلف
+                            user_agents = [
+                                'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
+                                'Mozilla/5.0 (Android 12; Mobile; rv:68.0) Gecko/68.0 Firefox/96.0',
+                                'Instagram 219.0.0.12.117 Android'
+                            ]
+                            
+                            for user_agent in user_agents:
+                                headers = {
+                                    'User-Agent': user_agent,
+                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                                    'Accept-Language': 'en-US,en;q=0.5',
+                                    'Referer': 'https://www.instagram.com/',
+                                    'Origin': 'https://www.instagram.com'
+                                }
+                                
+                                response = requests.get(url, headers=headers)
+                                if response.status_code == 200:
+                                    html_content = response.text
+                                    
+                                    # جستجو با الگوهای مختلف
+                                    for pattern in patterns:
+                                        matches = re.findall(pattern, html_content)
+                                        if matches:
+                                            for match in matches:
+                                                video_url = match.replace('\\u0026', '&')
+                                                logger.info(f"لینک ویدیو از الگوی پیشرفته: {video_url}")
+                                                
+                                                try:
+                                                    # دانلود ویدیو
+                                                    response = requests.get(video_url, headers=headers, stream=True)
+                                                    response.raise_for_status()
+                                                    
+                                                    with open(video_file, 'wb') as f:
+                                                        for chunk in response.iter_content(chunk_size=8192):
+                                                            f.write(chunk)
+                                                    
+                                                    # بررسی اندازه فایل
+                                                    if os.path.getsize(video_file) > 10000:  # حداقل 10KB
+                                                        download_success = True
+                                                        break
+                                                except Exception as e:
+                                                    logger.warning(f"خطا در دانلود ویدیو از لینک استخراج شده: {str(e)}")
+                                        
+                                    if download_success:
+                                        break
+                        except Exception as e:
+                            logger.warning(f"خطا در استخراج پیشرفته‌تر ویدیو: {str(e)}")
+                    
+                    # روش جدید: استفاده از سرویس‌های API خارجی
+                    if not download_success:
+                        try:
+                            logger.info("تلاش برای دانلود با سرویس‌های API خارجی...")
+                            
+                            # چند سرویس مختلف را امتحان کنید
+                            api_services = [
+                                {
+                                    "url": f"https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index?url={url}",
+                                    "headers": {
+                                        "X-RapidAPI-Key": "YOUR_RAPIDAPI_KEY",  # نیاز به ثبت‌نام در RapidAPI
+                                        "X-RapidAPI-Host": "instagram-downloader-download-instagram-videos-stories.p.rapidapi.com"
+                                    }
+                                },
+                                {
+                                    "url": f"https://instagram-media-downloader.p.rapidapi.com/rapid/download.php?url={url}",
+                                    "headers": {
+                                        "X-RapidAPI-Key": "YOUR_RAPIDAPI_KEY",
+                                        "X-RapidAPI-Host": "instagram-media-downloader.p.rapidapi.com"
+                                    }
+                                }
+                            ]
+                            
+                            for service in api_services:
+                                try:
+                                    response = requests.get(service["url"], headers=service["headers"])
+                                    if response.status_code == 200:
+                                        data = response.json()
+                                        if data.get("video_url") or data.get("media") or data.get("url"):
+                                            video_url = data.get("video_url") or data.get("media") or data.get("url")
+                                            logger.info(f"لینک ویدیو از API خارجی: {video_url}")
+                                            
+                                            # دانلود ویدیو
+                                            response = requests.get(video_url, stream=True)
+                                            response.raise_for_status()
+                                            
+                                            with open(video_file, 'wb') as f:
+                                                for chunk in response.iter_content(chunk_size=8192):
+                                                    f.write(chunk)
+                                            
+                                            download_success = True
+                                            break
+                                except Exception as e:
+                                    logger.warning(f"خطا در استفاده از سرویس API خارجی: {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"خطا در استفاده از سرویس‌های API خارجی: {str(e)}")
+                    
+                    # روش جدید: استفاده از سرویس‌های واسط
+                    if not download_success:
+                        try:
+                            logger.info("تلاش برای دانلود با سرویس‌های واسط...")
+                            
+                            # لیست سرویس‌های واسط
+                            proxy_services = [
+                                f"https://www.save-insta.com/api/ajaxSearch/index?q={url}",
+                                f"https://www.instagramsave.com/system/action.php?url={url}",
+                                f"https://saveinsta.app/api/ajaxSearch/index?q={url}",
+                                f"https://instadownloader.co/api/ajaxSearch/index?q={url}"
+                            ]
+                            
+                            for service_url in proxy_services:
+                                try:
+                                    headers = {
+                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                                        'Accept': 'application/json, text/javascript, */*; q=0.01',
+                                        'Referer': service_url.split('/api/')[0],
+                                        'X-Requested-With': 'XMLHttpRequest'
+                                    }
+                                    
+                                    response = requests.get(service_url, headers=headers)
+                                    if response.status_code == 200:
+                                        try:
+                                            data = response.json()
+                                            if data.get('medias'):
+                                                for media in data.get('medias'):
+                                                    if media.get('video'):
+                                                        video_url = media.get('video')
+                                                        logger.info(f"لینک ویدیو از سرویس واسط: {video_url}")
+                                                        
+                                                        # دانلود ویدیو
+                                                        response = requests.get(video_url, headers=headers, stream=True)
+                                                        response.raise_for_status()
+                                                        
+                                                        with open(video_file, 'wb') as f:
+                                                            for chunk in response.iter_content(chunk_size=8192):
+                                                                f.write(chunk)
+                                                        
+                                                        download_success = True
+                                                        break
+                                        except Exception as e:
+                                            logger.warning(f"خطا در پردازش پاسخ سرویس واسط: {str(e)}")
+                                    
+                                    if download_success:
+                                        break
+                                except Exception as e:
+                                    logger.warning(f"خطا در استفاده از سرویس واسط: {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"خطا در استفاده از سرویس‌های واسط: {str(e)}")
                     # روش اول: استفاده از instagrapi بدون لاگین
                     try:
                         logger.info("تلاش برای دانلود با instagrapi بدون لاگین...")
