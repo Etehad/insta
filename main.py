@@ -11,7 +11,6 @@ from flask import Flask
 import threading
 import time
 import logging
-import instaloader
 import tempfile
 import sys
 import atexit
@@ -138,95 +137,7 @@ def download_video(url, update: Update, context):
     try:
         safe_send_message(context, update.effective_chat.id, "در حال دانلود ویدیو... لطفاً صبر کنید.")
         
-        # استخراج کد پست از URL
-        shortcode = url.split('/reel/')[1].split('/')[0]
-        
-        # ایجاد یک پوشه موقت
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # راه‌اندازی instaloader
-            L = instaloader.Instaloader(
-                dirname_pattern=temp_dir,
-                filename_pattern='%(shortcode)s',
-                download_videos=True,
-                download_video_thumbnails=False,
-                download_geotags=False,
-                download_comments=False,
-                save_metadata=False,
-                compress_json=False,
-                max_connection_attempts=3
-            )
-            
-            try:
-                # ورود به اینستاگرام
-                L.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-                
-                # دانلود پست
-                post = instaloader.Post.from_shortcode(L.context, shortcode)
-                L.download_post(post, target=temp_dir)
-                
-                # پیدا کردن فایل ویدیو
-                video_files = [f for f in os.listdir(temp_dir) if f.endswith('.mp4')]
-                if not video_files:
-                    raise Exception("فایل ویدیو پیدا نشد")
-                
-                video_path = os.path.join(temp_dir, video_files[0])
-                
-                # ارسال ویدیو
-                try:
-                    with open(video_path, 'rb') as video_file:
-                        context.bot.send_video(
-                            chat_id=update.effective_chat.id,
-                            video=video_file,
-                            caption=f"🎥 {post.caption if post.caption else 'ویدیو'}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                            parse_mode="Markdown"
-                        )
-                except RetryAfter as e:
-                    logger.warning(f"RetryAfter error while sending video: {e}")
-                    time.sleep(e.retry_after)
-                    with open(video_path, 'rb') as video_file:
-                        context.bot.send_video(
-                            chat_id=update.effective_chat.id,
-                            video=video_file,
-                            caption=f"🎥 {post.caption if post.caption else 'ویدیو'}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                            parse_mode="Markdown"
-                        )
-                
-            except Exception as e:
-                logger.error(f"خطا در دانلود: {str(e)}")
-                if "login required" in str(e).lower():
-                    safe_send_message(
-                        context,
-                        update.effective_chat.id,
-                        "خطا در دسترسی به اینستاگرام. لطفاً دوباره تلاش کنید یا از لینک دیگری استفاده کنید."
-                    )
-                else:
-                    safe_send_message(
-                        context,
-                        update.effective_chat.id,
-                        f"خطا در دانلود ویدیو: {str(e)}"
-                    )
-            
-    except Exception as e:
-        logger.error(f"خطای کلی در دانلود: {str(e)}")
-        safe_send_message(
-            context,
-            update.effective_chat.id,
-            "خطا در دانلود ویدیو. لطفاً دوباره تلاش کنید."
-        )
-
-# تابع پردازش لینک
-def handle_link(update: Update, context):
-    if not check_membership(update, context):
-        return
-
-    url = update.message.text
-    logger.info(f"Received URL: {url}")
-
-    # بررسی نوع لینک
-    if 'instagram.com/reel/' in url.lower():
-        threading.Thread(target=download_video, args=(url, update, context)).start()
-    elif any(domain in url.lower() for domain in ['youtube.com', 'youtu.be', 'tiktok.com', 'facebook.com', 'fb.watch']):
-        # برای سایر پلتفرم‌ها از yt-dlp استفاده می‌کنیم
+        # تنظیمات yt-dlp
         ydl_opts = {
             'format': 'best',
             'outtmpl': '%(title)s.%(ext)s',
@@ -253,6 +164,14 @@ def handle_link(update: Update, context):
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': 'en-us,en;q=0.5',
                 'Sec-Fetch-Mode': 'navigate',
+            },
+            'extractor_args': {
+                'instagram': {
+                    'username': INSTAGRAM_USERNAME,
+                    'password': INSTAGRAM_PASSWORD,
+                    'extract_media': True,
+                    'extract_media_type': 'video',
+                }
             }
         }
         
@@ -293,11 +212,38 @@ def handle_link(update: Update, context):
                     
             except Exception as e:
                 logger.error(f"خطا در دانلود: {str(e)}")
-                safe_send_message(
-                    context,
-                    update.effective_chat.id,
-                    f"خطا در دانلود ویدیو: {str(e)}"
-                )
+                if "login required" in str(e).lower():
+                    safe_send_message(
+                        context,
+                        update.effective_chat.id,
+                        "خطا در دسترسی به اینستاگرام. لطفاً دوباره تلاش کنید یا از لینک دیگری استفاده کنید."
+                    )
+                else:
+                    safe_send_message(
+                        context,
+                        update.effective_chat.id,
+                        f"خطا در دانلود ویدیو: {str(e)}"
+                    )
+            
+    except Exception as e:
+        logger.error(f"خطای کلی در دانلود: {str(e)}")
+        safe_send_message(
+            context,
+            update.effective_chat.id,
+            "خطا در دانلود ویدیو. لطفاً دوباره تلاش کنید."
+        )
+
+# تابع پردازش لینک
+def handle_link(update: Update, context):
+    if not check_membership(update, context):
+        return
+
+    url = update.message.text
+    logger.info(f"Received URL: {url}")
+
+    # بررسی نوع لینک
+    if any(domain in url.lower() for domain in ['instagram.com', 'youtube.com', 'youtu.be', 'tiktok.com', 'facebook.com', 'fb.watch']):
+        threading.Thread(target=download_video, args=(url, update, context)).start()
     else:
         safe_send_message(context, update.effective_chat.id, "لطفاً یک لینک معتبر از اینستاگرام، یوتیوب، تیک تاک یا فیسبوک ارسال کنید.")
 
