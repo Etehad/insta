@@ -13,6 +13,8 @@ import time
 import logging
 import instaloader
 import tempfile
+import sys
+import atexit
 
 # تنظیم لاگینگ
 logging.basicConfig(
@@ -39,6 +41,9 @@ REQUIRED_CHANNELS = [
 # راه‌اندازی وب‌سرور Flask برای فعال نگه داشتن
 app = Flask(__name__)
 
+# متغیر برای نگهداری نمونه ربات
+bot_instance = None
+
 @app.route('/')
 def ping():
     return "Bot is alive!", 200
@@ -48,6 +53,17 @@ def run_flask():
     print("Starting Flask server for 24/7 activity...")
     port = int(os.getenv("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
+# تابع پاکسازی در هنگام خروج
+def cleanup():
+    global bot_instance
+    if bot_instance:
+        logger.info("Stopping bot...")
+        bot_instance.stop()
+        bot_instance = None
+
+# ثبت تابع پاکسازی
+atexit.register(cleanup)
 
 # تابع ارسال پیام با مدیریت خطا
 def safe_send_message(context, chat_id, text, **kwargs):
@@ -311,24 +327,40 @@ def button_handler(update: Update, context):
 
 # تابع اصلی
 def main():
-    logger.info("Bot is starting...")
-    updater = Updater(TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
+    global bot_instance
+    
+    # بررسی وجود نمونه قبلی
+    if bot_instance:
+        logger.warning("Bot is already running!")
+        return
+    
+    try:
+        logger.info("Bot is starting...")
+        bot_instance = Updater(TOKEN, use_context=True)
+        dispatcher = bot_instance.dispatcher
 
-    # ثبت handlerها
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
+        # ثبت handlerها
+        dispatcher.add_handler(CommandHandler("start", start))
+        dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
+        dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
-    # اضافه کردن error handler
-    dispatcher.add_error_handler(error_handler)
+        # اضافه کردن error handler
+        dispatcher.add_error_handler(error_handler)
 
-    updater.start_polling()
+        # شروع ربات
+        bot_instance.start_polling(drop_pending_updates=True)
 
-    # اجرای وب‌سرور Flask برای جلوگیری از خوابیدن
-    threading.Thread(target=run_flask, daemon=False).start()
+        # اجرای وب‌سرور Flask برای جلوگیری از خوابیدن
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
 
-    updater.idle()
+        logger.info("Bot started successfully!")
+        bot_instance.idle()
+
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+        cleanup()
+        sys.exit(1)
 
 # تابع مدیریت خطا
 def error_handler(update: Update, context):
