@@ -143,6 +143,11 @@ def download_video(url, update: Update, context):
                 'Accept-Language': 'en-us,en;q=0.5',
                 'Sec-Fetch-Mode': 'navigate',
             },
+            'cookiesfrombrowser': ('chrome',),  # استفاده از کوکی‌های کروم
+            'username': os.getenv('INSTAGRAM_USERNAME', 'etehadtaskforce'),  # نام کاربری اینستاگرام
+            'password': os.getenv('INSTAGRAM_PASSWORD', 'Aa123456*'),  # رمز عبور اینستاگرام
+            'extract_flat': False,
+            'force_generic_extractor': False,
             'extractor_args': {
                 'instagram': {
                     'extract_media': True,
