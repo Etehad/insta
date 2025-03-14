@@ -14,6 +14,8 @@ import logging
 import tempfile
 import sys
 import atexit
+from instagrapi import Client
+import io
 
 # تنظیم لاگینگ
 logging.basicConfig(
@@ -137,88 +139,122 @@ def download_video(url, update: Update, context):
     try:
         safe_send_message(context, update.effective_chat.id, "در حال دانلود ویدیو... لطفاً صبر کنید.")
         
-        # تنظیمات yt-dlp
-        ydl_opts = {
-            'format': 'best',
-            'outtmpl': '%(title)s.%(ext)s',
-            'quiet': True,
-            'no_warnings': False,
-            'verbose': True,
-            'ignoreerrors': True,
-            'no_check_certificates': True,
-            'prefer_insecure': True,
-            'geo_verification_proxy': '',
-            'source_address': '0.0.0.0',
-            'socket_timeout': 30,
-            'retries': 10,
-            'fragment_retries': 10,
-            'file_access_retries': 10,
-            'extractor_retries': 10,
-            'retry_sleep': 5,
-            'retry_sleep_functions': {'fragment': lambda n: 5 * (n + 1)},
-            'skip_unavailable_fragments': True,
-            'keep_fragments': False,
-            'buffersize': 32768,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Sec-Fetch-Mode': 'navigate',
-            },
-            'extractor_args': {
-                'instagram': {
-                    'username': INSTAGRAM_USERNAME,
-                    'password': INSTAGRAM_PASSWORD,
-                    'extract_media': True,
-                    'extract_media_type': 'video',
-                }
-            }
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        if 'instagram.com' in url.lower():
+            # استخراج کد پست از URL
+            shortcode = url.split('/reel/')[1].split('/')[0]
+            
+            # راه‌اندازی کلاینت اینستاگرام
+            cl = Client()
+            
             try:
-                info = ydl.extract_info(url, download=True)
-                if not info:
-                    raise Exception("اطلاعات ویدیو استخراج نشد")
-                    
-                video_path = f"{info.get('title', 'video')}.{info.get('ext', 'mp4')}"
+                # ورود به اینستاگرام
+                cl.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
                 
-                if not os.path.exists(video_path):
-                    raise Exception("فایل ویدیو دانلود نشد")
+                # دریافت اطلاعات پست
+                media = cl.media_info_by_code(shortcode)
+                
+                if not media or not media.video_url:
+                    raise Exception("ویدیو در دسترس نیست")
+                
+                # دانلود ویدیو
+                video_data = requests.get(media.video_url).content
                 
                 # ارسال ویدیو
                 try:
-                    with open(video_path, 'rb') as video_file:
-                        context.bot.send_video(
-                            chat_id=update.effective_chat.id,
-                            video=video_file,
-                            caption=f"🎥 {info.get('title', 'ویدیو')}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                            parse_mode="Markdown"
-                        )
+                    context.bot.send_video(
+                        chat_id=update.effective_chat.id,
+                        video=io.BytesIO(video_data),
+                        caption=f"🎥 {media.caption_text if media.caption_text else 'ویدیو'}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
+                        parse_mode="Markdown"
+                    )
                 except RetryAfter as e:
                     logger.warning(f"RetryAfter error while sending video: {e}")
                     time.sleep(e.retry_after)
-                    with open(video_path, 'rb') as video_file:
-                        context.bot.send_video(
-                            chat_id=update.effective_chat.id,
-                            video=video_file,
-                            caption=f"🎥 {info.get('title', 'ویدیو')}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                            parse_mode="Markdown"
-                        )
-                
-                # حذف فایل موقت
-                if os.path.exists(video_path):
-                    os.remove(video_path)
-                    
-            except Exception as e:
-                logger.error(f"خطا در دانلود: {str(e)}")
-                if "login required" in str(e).lower():
-                    safe_send_message(
-                        context,
-                        update.effective_chat.id,
-                        "خطا در دسترسی به اینستاگرام. لطفاً دوباره تلاش کنید یا از لینک دیگری استفاده کنید."
+                    context.bot.send_video(
+                        chat_id=update.effective_chat.id,
+                        video=io.BytesIO(video_data),
+                        caption=f"🎥 {media.caption_text if media.caption_text else 'ویدیو'}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
+                        parse_mode="Markdown"
                     )
-                else:
+                
+            except Exception as e:
+                logger.error(f"خطا در دانلود از اینستاگرام: {str(e)}")
+                safe_send_message(
+                    context,
+                    update.effective_chat.id,
+                    "خطا در دانلود ویدیو از اینستاگرام. لطفاً دوباره تلاش کنید."
+                )
+            finally:
+                cl.logout()
+                
+        else:
+            # برای سایر پلتفرم‌ها از yt-dlp استفاده می‌کنیم
+            ydl_opts = {
+                'format': 'best',
+                'outtmpl': '%(title)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': False,
+                'verbose': True,
+                'ignoreerrors': True,
+                'no_check_certificates': True,
+                'prefer_insecure': True,
+                'geo_verification_proxy': '',
+                'source_address': '0.0.0.0',
+                'socket_timeout': 30,
+                'retries': 10,
+                'fragment_retries': 10,
+                'file_access_retries': 10,
+                'extractor_retries': 10,
+                'retry_sleep': 5,
+                'retry_sleep_functions': {'fragment': lambda n: 5 * (n + 1)},
+                'skip_unavailable_fragments': True,
+                'keep_fragments': False,
+                'buffersize': 32768,
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-us,en;q=0.5',
+                    'Sec-Fetch-Mode': 'navigate',
+                }
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=True)
+                    if not info:
+                        raise Exception("اطلاعات ویدیو استخراج نشد")
+                        
+                    video_path = f"{info.get('title', 'video')}.{info.get('ext', 'mp4')}"
+                    
+                    if not os.path.exists(video_path):
+                        raise Exception("فایل ویدیو دانلود نشد")
+                    
+                    # ارسال ویدیو
+                    try:
+                        with open(video_path, 'rb') as video_file:
+                            context.bot.send_video(
+                                chat_id=update.effective_chat.id,
+                                video=video_file,
+                                caption=f"🎥 {info.get('title', 'ویدیو')}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
+                                parse_mode="Markdown"
+                            )
+                    except RetryAfter as e:
+                        logger.warning(f"RetryAfter error while sending video: {e}")
+                        time.sleep(e.retry_after)
+                        with open(video_path, 'rb') as video_file:
+                            context.bot.send_video(
+                                chat_id=update.effective_chat.id,
+                                video=video_file,
+                                caption=f"🎥 {info.get('title', 'ویدیو')}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
+                                parse_mode="Markdown"
+                            )
+                    
+                    # حذف فایل موقت
+                    if os.path.exists(video_path):
+                        os.remove(video_path)
+                        
+                except Exception as e:
+                    logger.error(f"خطا در دانلود: {str(e)}")
                     safe_send_message(
                         context,
                         update.effective_chat.id,
