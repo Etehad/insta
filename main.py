@@ -1,176 +1,176 @@
 import os
-import sys
-import logging
-import time
-import re
-import threading
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-import youtube_dl
+import yt_dlp
+import re
 import requests
-from instaloader import Instaloader, Post
+from bs4 import BeautifulSoup
+import sqlite3
 from flask import Flask
 
-# تنظیم لاگ‌گیری
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# تنظیمات
+# توکن ربات تلگرام
 TOKEN = os.getenv('TOKEN', '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU')
-ADMIN_ID = 6473845417
-REQUIRED_CHANNELS = [{"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}]
 
-# راه‌اندازی Flask
+# تنظیمات ادمین
+ADMIN_ID = 6473845417
+
+# تنظیم کانال‌های اجباری
+REQUIRED_CHANNELS = [
+    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"},
+    {"chat_id": "-1002301139625", "username": "@kingwor17172"}
+]
+
+# راه‌اندازی وب‌سرور Flask برای فعال نگه داشتن
 app = Flask(__name__)
 
 @app.route('/')
 def ping():
     return "Bot is alive!", 200
 
+# تابع برای اجرای وب‌سرور
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    print("Starting Flask server for 24/7 activity...")
+    port = int(os.getenv("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
 
 # تابع خوش‌آمدگویی
 def start(update: Update, context):
+    print(f"User {update.effective_user.id} started the bot")
     if not check_membership(update, context):
         return
+
+    keyboard = [
+        [InlineKeyboardButton("راهنمای استفاده", callback_data="help")],
+        [InlineKeyboardButton("پشتیبانی", callback_data="support")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     update.message.reply_text(
-        "سلام! لینک ویدیو رو از اینستاگرام، یوتیوب، تیک‌تاک یا فیسبوک بفرستید تا براتون دانلود کنم."
+        "سلام! به ربات دانلود ویدیو خوش آمدید.\n\n"
+        "شما می‌توانید ویدیوهای زیر را دانلود کنید:\n"
+        "📱 اینستاگرام\n"
+        "🎥 یوتیوب\n"
+        "📱 تیک تاک\n"
+        "👥 فیسبوک\n\n"
+        "لطفاً لینک ویدیوی مورد نظر خود را ارسال کنید.",
+        reply_markup=reply_markup
     )
 
-# تابع بررسی عضویت (فقط برای چت خصوصی)
-def check_membership(update: Update, context):
+# تابع بررسی عضویت در کانال‌های اجباری
+def check_membership(update: Update, context) -> bool:
     user_id = update.effective_user.id
-    not_joined = []
+    not_joined_channels = []
+
     for channel in REQUIRED_CHANNELS:
         try:
-            status = context.bot.get_chat_member(chat_id=channel["chat_id"], user_id=user_id).status
+            member = context.bot.get_chat_member(chat_id=channel["chat_id"], user_id=user_id)
+            status = member.status
             if status not in ['member', 'administrator', 'creator']:
-                not_joined.append(channel)
+                not_joined_channels.append(channel)
         except Exception as e:
-            logger.error(f"خطا در بررسی عضویت: {str(e)}")
-            not_joined.append(channel)
-    if not_joined:
-        keyboard = [[InlineKeyboardButton(f"عضویت در {c['username']}", url=f"https://t.me/{c['username'][1:]}")] for c in not_joined]
-        update.message.reply_text("لطفاً در کانال‌ها عضو بشید:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return False
-    return True
+            print(f"خطا در بررسی عضویت کاربر {user_id} در کانال {channel['username']}: {str(e)}")
+            not_joined_channels.append(channel)
 
-# تابع دانلود و ارسال ویدیو (یوتیوب، تیک‌تاک، فیسبوک)
-def process_and_send_video(url, chat_id, context):
+    if not not_joined_channels:
+        return True
+
+    keyboard = []
+    for channel in not_joined_channels:
+        keyboard.append([InlineKeyboardButton(text=f"عضویت در {channel['username']}", url=f"https://t.me/{channel['username'].replace('@', '')}")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text(
+        "برای استفاده از ربات، لطفا در کانال‌های زیر عضو شوید و سپس دوباره امتحان کنید:",
+        reply_markup=reply_markup
+    )
+    return False
+
+# تابع دانلود ویدیو
+def download_video(url, update: Update, context):
     try:
+        update.message.reply_text("در حال دانلود ویدیو... لطفاً صبر کنید.")
+        
         ydl_opts = {
             'format': 'best',
-            'outtmpl': 'downloads/%(id)s.%(ext)s',
+            'outtmpl': '%(title)s.%(ext)s',
             'quiet': True,
-            'no_warnings': True,
         }
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            video_url = info['url']
-            title = info.get('title', 'بدون عنوان')
-            thumbnail_url = info.get('thumbnail', None)
-
-        video_path = f"downloads/{info['id']}.{info['ext']}"
-        with requests.get(video_url, stream=True) as r:
-            r.raise_for_status()
-            with open(video_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-        with open(video_path, 'rb') as f:
-            context.bot.send_video(chat_id=chat_id, video=f, caption=f"{title}\n[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
-        os.remove(video_path)
-
-        if thumbnail_url:
-            thumbnail_path = f"downloads/{info['id']}_thumbnail.jpg"
-            with requests.get(thumbnail_url, stream=True) as r:
-                r.raise_for_status()
-                with open(thumbnail_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-            with open(thumbnail_path, 'rb') as f:
-                context.bot.send_photo(chat_id=chat_id, photo=f, caption=f"کاور ویدیو\n[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
-            os.remove(thumbnail_path)
-
-        context.bot.send_message(chat_id=chat_id, text="ویدیو با موفقیت ارسال شد.")
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            video_path = f"{info['title']}.{info['ext']}"
+            
+            # ارسال ویدیو
+            with open(video_path, 'rb') as video_file:
+                context.bot.send_video(
+                    chat_id=update.effective_chat.id,
+                    video=video_file,
+                    caption=f"🎥 {info['title']}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
+                    parse_mode="Markdown"
+                )
+            
+            # حذف فایل موقت
+            os.remove(video_path)
+            
     except Exception as e:
-        logger.error(f"خطا در دانلود ویدیو: {str(e)}")
-        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود ویدیو: {str(e)}")
+        print(f"خطا در دانلود: {str(e)}")
+        update.message.reply_text(f"خطا در دانلود ویدیو: {str(e)}")
 
-# تابع دانلود و ارسال پست اینستاگرام
-def process_and_send_instagram_post(shortcode, chat_id, context):
-    try:
-        L = Instaloader()
-        post = Post.from_shortcode(L.context, shortcode)
-        L.download_post(post, target="downloads")
-
-        downloaded_files = os.listdir("downloads")
-        for file in downloaded_files:
-            file_path = os.path.join("downloads", file)
-            if file.endswith(".mp4"):
-                with open(file_path, 'rb') as f:
-                    context.bot.send_video(chat_id=chat_id, video=f, caption="[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
-            elif file.endswith((".jpg", ".jpeg", ".png")):
-                with open(file_path, 'rb') as f:
-                    context.bot.send_photo(chat_id=chat_id, photo=f, caption=post.caption or "[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", timeout=30)
-            os.remove(file_path)
-        context.bot.send_message(chat_id=chat_id, text="پست اینستاگرام با موفقیت ارسال شد.")
-    except Exception as e:
-        logger.error(f"خطا در دانلود پست اینستاگرام: {str(e)}")
-        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود پست اینستاگرام: {str(e)}")
-
-# تابع مدیریت لینک‌ها
+# تابع پردازش لینک
 def handle_link(update: Update, context):
-    chat_id = update.effective_chat.id
-    message_text = update.message.text
-
-    # الگوی تشخیص لینک
-    url_pattern = r'(https?://[^\s]+)'
-    if not re.search(url_pattern, message_text):
-        return  # اگر پیام لینک نداشته باشه، نادیده گرفته می‌شه
-
-    # چک کردن عضویت فقط در چت خصوصی
-    if update.effective_chat.type == "private" and not check_membership(update, context):
+    if not check_membership(update, context):
         return
 
-    update.message.reply_text("در حال پردازش لینک...")
-    try:
-        if "instagram.com" in message_text:
-            shortcode = re.search(r"(?:/p/|/reel/)([^/?]+)", message_text).group(1)
-            threading.Thread(target=process_and_send_instagram_post, args=(shortcode, chat_id, context)).start()
-        elif "youtube.com" in message_text or "youtu.be" in message_text:
-            threading.Thread(target=process_and_send_video, args=(message_text, chat_id, context)).start()
-        elif "tiktok.com" in message_text:
-            threading.Thread(target=process_and_send_video, args=(message_text, chat_id, context)).start()
-        elif "facebook.com" in message_text or "fb.watch" in message_text:
-            threading.Thread(target=process_and_send_video, args=(message_text, chat_id, context)).start()
-        else:
-            update.message.reply_text("این پلتفرم پشتیبانی نمی‌شه.")
-    except Exception as e:
-        logger.error(f"خطا در پردازش لینک: {str(e)}")
-        update.message.reply_text(f"خطا در پردازش لینک: {str(e)}")
+    url = update.message.text
+    print(f"Received URL: {url}")
+
+    # بررسی نوع لینک
+    if any(domain in url.lower() for domain in ['instagram.com', 'youtube.com', 'youtu.be', 'tiktok.com', 'facebook.com', 'fb.watch']):
+        threading.Thread(target=download_video, args=(url, update, context)).start()
+    else:
+        update.message.reply_text("لطفاً یک لینک معتبر از اینستاگرام، یوتیوب، تیک تاک یا فیسبوک ارسال کنید.")
+
+# مدیریت دکمه‌ها
+def button_handler(update: Update, context):
+    query = update.callback_query
+    query.answer()
+
+    if query.data == "help":
+        query.edit_message_text(
+            "📱 **راهنمای استفاده از ربات:**\n\n"
+            "1. لینک ویدیوی مورد نظر خود را از یکی از شبکه‌های زیر کپی کنید:\n"
+            "   - اینستاگرام\n"
+            "   - یوتیوب\n"
+            "   - تیک تاک\n"
+            "   - فیسبوک\n\n"
+            "2. لینک را در چت ربات ارسال کنید\n"
+            "3. ربات به صورت خودکار ویدیو را دانلود و برای شما ارسال می‌کند\n\n"
+            "نکته: برای استفاده از ربات باید در کانال‌های اجباری عضو باشید.",
+            parse_mode="Markdown"
+        )
+    elif query.data == "support":
+        query.edit_message_text(
+            "برای پشتیبانی با ادمین در ارتباط باشید:\n"
+            "@task_1_4_1_force"
+        )
 
 # تابع اصلی
 def main():
-    logger.info("Bot is starting...")
+    print("Bot is starting...")
     updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
-    # هندلرها
+    # ثبت handlerها
     dispatcher.add_handler(CommandHandler("start", start))
-    # فقط پیام‌هایی که لینک دارن رو مدیریت کن
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
+    dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
-    threading.Thread(target=run_flask, daemon=True).start()
     updater.start_polling()
+
+    # اجرای وب‌سرور Flask برای جلوگیری از خوابیدن
+    threading.Thread(target=run_flask, daemon=False).start()
+
     updater.idle()
 
 if __name__ == "__main__":
-    if not os.path.exists("downloads"):
-        os.makedirs("downloads")
     main()
