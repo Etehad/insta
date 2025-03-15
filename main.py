@@ -62,8 +62,20 @@ def login_with_session():
         if os.path.exists(SESSION_FILE):
             print(f'بارگذاری session از {SESSION_FILE}')
             ig_client.load_settings(SESSION_FILE)
-            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            print(f'با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) با session وارد شد.')
+            try:
+                # تلاش برای استفاده از session موجود
+                ig_client.get_timeline_feed()
+                print(f'با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) با session وارد شد.')
+            except Exception as e:
+                print(f'خطا در استفاده از session موجود: {str(e)}')
+                print('تلاش برای ورود مجدد...')
+                # حذف فایل session قبلی
+                os.remove(SESSION_FILE)
+                # ورود مجدد
+                ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                print(f'با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد.')
+                ig_client.dump_settings(SESSION_FILE)
+                print(f'session جدید با موفقیت در {SESSION_FILE} ذخیره شد.')
         else:
             print(f'در حال ورود به اینستاگرام با نام کاربری: {INSTAGRAM_USERNAME}')
             ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
@@ -219,8 +231,31 @@ def process_and_send_post(media_id, telegram_id, context):
             print(f"Shortcode استخراج‌شده: {shortcode}")
         except Exception as e:
             print(f"خطا در دریافت اطلاعات رسانه: {str(e)}")
-            context.bot.send_message(chat_id=telegram_id, text=f"خطا در پردازش رسانه: {str(e)}")
-            return
+            
+            # اگر خطای 401 رخ داد، تلاش برای ورود مجدد
+            if "401" in str(e):
+                print("خطای احراز هویت 401 رخ داد. تلاش برای ورود مجدد...")
+                try:
+                    # حذف فایل session قبلی اگر وجود داشته باشد
+                    if os.path.exists(SESSION_FILE):
+                        os.remove(SESSION_FILE)
+                    
+                    # ورود مجدد
+                    ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                    print("ورود مجدد با موفقیت انجام شد. تلاش مجدد برای دریافت اطلاعات رسانه...")
+                    ig_client.dump_settings(SESSION_FILE)
+                    
+                    # تلاش مجدد برای دریافت اطلاعات رسانه
+                    media_info = ig_client.media_info(media_id)
+                    shortcode = media_info.code
+                    print(f"Shortcode استخراج‌شده (پس از ورود مجدد): {shortcode}")
+                except Exception as login_error:
+                    print(f"خطا در ورود مجدد: {str(login_error)}")
+                    context.bot.send_message(chat_id=telegram_id, text="خطا در احراز هویت اینستاگرام. لطفاً بعداً دوباره تلاش کنید.")
+                    return
+            else:
+                context.bot.send_message(chat_id=telegram_id, text=f"خطا در پردازش رسانه: {str(e)}")
+                return
 
         # دانلود پست
         post = instaloader.Post.from_shortcode(L.context, shortcode)
@@ -248,7 +283,7 @@ def process_and_send_post(media_id, telegram_id, context):
                             video=f,
                             caption="[TaskForce](https://t.me/task_1_4_1_force)",
                             parse_mode="Markdown",
-                            timeout=30  # افزایش زمان‌منتظر برای ارسال
+                            timeout=60  # افزایش زمان‌منتظر برای ارسال
                         )
                         video_sent = True
                         print(f"ویدیو با موفقیت ارسال شد: {video_path}")
@@ -274,7 +309,7 @@ def process_and_send_post(media_id, telegram_id, context):
                                 photo=f,
                                 caption=f"{post.caption}\n[TaskForce](https://t.me/task_1_4_1_force)",
                                 parse_mode="Markdown",
-                                timeout=30  # افزایش زمان‌منتظر برای ارسال
+                                timeout=60  # افزایش زمان‌منتظر برای ارسال
                             )
                             cover_sent = True
                             print(f"کاور با موفقیت ارسال شد: {file_path}")
@@ -306,7 +341,27 @@ def process_and_send_post(media_id, telegram_id, context):
 def process_and_send_story(story_id, telegram_id, context):
     try:
         print(f"شروع دانلود استوری برای telegram_id: {telegram_id}, story_id: {story_id}")
-        media = ig_client.story_info(story_id)
+        try:
+            media = ig_client.story_info(story_id)
+        except Exception as e:
+            if "401" in str(e):
+                print("خطای احراز هویت 401 در دریافت اطلاعات استوری. تلاش برای ورود مجدد...")
+                # حذف فایل session قبلی اگر وجود داشته باشد
+                if os.path.exists(SESSION_FILE):
+                    os.remove(SESSION_FILE)
+                
+                # ورود مجدد
+                ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                print("ورود مجدد با موفقیت انجام شد. تلاش مجدد برای دریافت اطلاعات استوری...")
+                ig_client.dump_settings(SESSION_FILE)
+                
+                # تلاش مجدد برای دریافت اطلاعات استوری
+                media = ig_client.story_info(story_id)
+            else:
+                print(f"خطا در دریافت اطلاعات استوری: {str(e)}")
+                context.bot.send_message(chat_id=telegram_id, text=f"خطا در دریافت اطلاعات استوری: {str(e)}")
+                return
+                
         if media:
             video_url = getattr(media, 'video_url', None)
             photo_url = getattr(media, 'thumbnail_url', None)
@@ -329,8 +384,29 @@ def check_instagram_dms(context):
     while True:
         try:
             print("چک کردن دایرکت‌ها...")
-            inbox = ig_client.direct_threads(amount=50)
-            print(f"تعداد دایرکت‌ها: {len(inbox)}")
+            try:
+                inbox = ig_client.direct_threads(amount=50)
+                print(f"تعداد دایرکت‌ها: {len(inbox)}")
+            except Exception as e:
+                if "401" in str(e):
+                    print("خطای احراز هویت 401 در دریافت دایرکت‌ها. تلاش برای ورود مجدد...")
+                    # حذف فایل session قبلی اگر وجود داشته باشد
+                    if os.path.exists(SESSION_FILE):
+                        os.remove(SESSION_FILE)
+                    
+                    # ورود مجدد
+                    ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                    print("ورود مجدد با موفقیت انجام شد. تلاش مجدد برای دریافت دایرکت‌ها...")
+                    ig_client.dump_settings(SESSION_FILE)
+                    
+                    # تلاش مجدد برای دریافت دایرکت‌ها
+                    inbox = ig_client.direct_threads(amount=50)
+                    print(f"تعداد دایرکت‌ها (پس از ورود مجدد): {len(inbox)}")
+                else:
+                    print(f"خطا در دریافت دایرکت‌ها: {str(e)}")
+                    time.sleep(30)
+                    continue
+                
             for thread in inbox:
                 for message in thread.messages:
                     if not db.is_message_processed(message.id):
@@ -410,8 +486,26 @@ def handle_link(update: Update, context):
             print(f"Extracted Shortcode: {shortcode}")  # لاگ برای چک کردن Shortcode
 
             # تبدیل shortcode به media_id
-            media_id = ig_client.media_pk_from_code(shortcode)
-            print(f"Extracted Media ID: {media_id}")  # لاگ برای چک کردن media_id
+            try:
+                media_id = ig_client.media_pk_from_code(shortcode)
+                print(f"Extracted Media ID: {media_id}")  # لاگ برای چک کردن media_id
+            except Exception as e:
+                if "401" in str(e):
+                    print("خطای احراز هویت 401 در تبدیل shortcode به media_id. تلاش برای ورود مجدد...")
+                    # حذف فایل session قبلی اگر وجود داشته باشد
+                    if os.path.exists(SESSION_FILE):
+                        os.remove(SESSION_FILE)
+                    
+                    # ورود مجدد
+                    ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                    print("ورود مجدد با موفقیت انجام شد. تلاش مجدد برای تبدیل shortcode به media_id...")
+                    ig_client.dump_settings(SESSION_FILE)
+                    
+                    # تلاش مجدد برای تبدیل shortcode به media_id
+                    media_id = ig_client.media_pk_from_code(shortcode)
+                    print(f"Extracted Media ID (پس از ورود مجدد): {media_id}")
+                else:
+                    raise
 
             # پردازش مثل دایرکت (استفاده از media_id مستقیم)
             telegram_id = update.effective_user.id
