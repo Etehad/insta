@@ -35,6 +35,10 @@ app = Flask(__name__)
 def ping():
     return 'Bot is alive!', 200
 
+@app.route('/health')
+def health():
+    return 'OK', 200
+
 # تابع برای اجرای وب‌سرور با حلقه فعال
 def run_flask():
     print('Starting Flask server for 24/7 activity...')
@@ -510,7 +514,24 @@ def main():
     instagram_thread = threading.Thread(target=check_instagram_dms, args=(dispatcher,), daemon=True)
     instagram_thread.start()
 
-    updater.start_polling()
+    # تنظیم webhook برای محیط‌های ابری مانند Render.com
+    PORT = int(os.environ.get('PORT', 8080))
+    WEBHOOK_URL = os.environ.get('WEBHOOK_URL', '')
+    
+    if WEBHOOK_URL:
+        # استفاده از webhook در محیط production
+        updater.start_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=TOKEN,
+            webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
+        )
+        print(f"Bot started with webhook on port {PORT}")
+    else:
+        # استفاده از polling در محیط local
+        updater.start_polling()
+        print("Bot started with polling")
+    
     updater.idle()
 
 if __name__ == "__main__":
