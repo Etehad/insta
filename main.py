@@ -1,86 +1,168 @@
 import os
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.error import RetryAfter, TelegramError
-import yt_dlp
-import re
-import logging
-import tempfile
-import sys
-import atexit
+import instaloader
+from instagrapi import Client
+from instagrapi.exceptions import TwoFactorRequired, ClientError
+import database as db
+from api import start_api_server
 import threading
 import time
-import requests
-from keep_alive import keep_alive
-from bs4 import BeautifulSoup
-import json
-from instagrapi import Client
-from instagrapi.exceptions import LoginRequired
-
-# تنظیم لاگینگ
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+import sqlite3
+from flask import Flask
 
 # توکن ربات تلگرام
-TOKEN = os.getenv('TOKEN', '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU')
+TOKEN = os.environ.get('TOKEN', '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU')
 
 # تنظیمات ادمین
-ADMIN_ID = 6473845417
+ADMIN_ID = int(os.environ.get('ADMIN_ID', '6473845417'))
 
 # تنظیم کانال‌های اجباری
 REQUIRED_CHANNELS = [
-    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
+    {'chat_id': '-1001860545237', 'username': '@task_1_4_1_force'}
 ]
 
-# متغیر برای نگهداری نمونه ربات
-bot_instance = None
 
-# تابع پاکسازی در هنگام خروج
-def cleanup():
-    global bot_instance
-    if bot_instance:
-        logger.info("Stopping bot...")
-        bot_instance.stop()
-        bot_instance = None
+# تنظیمات اینستاگرام
+INSTAGRAM_USERNAME = os.environ.get('INSTAGRAM_USERNAME', 'etehadtaskforce')
+INSTAGRAM_PASSWORD = os.environ.get('INSTAGRAM_PASSWORD', 'Aa123456*')
+SESSION_FILE = 'session.json'  # فایل برای ذخیره session
 
-# ثبت تابع پاکسازی
-atexit.register(cleanup)
+# راه‌اندازی وب‌سرور Flask برای فعال نگه داشتن
+app = Flask(__name__)
 
-# تابع ارسال پیام با مدیریت خطا
-def safe_send_message(context, chat_id, text, **kwargs):
+@app.route('/')
+def ping():
+    return 'Bot is alive!', 200
+
+# تابع برای اجرای وب‌سرور با حلقه فعال
+def run_flask():
+    print('Starting Flask server for 24/7 activity...')
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+# راه‌اندازی پایگاه داده
+db.initialize_db()
+
+# شروع سرور API (اگه لازم داری)
+start_api_server()
+
+
+# ورود به اینستاگرام با instagrapi
+ig_client = Client()
+
+def login_with_session():
     try:
-        return context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
-    except RetryAfter as e:
-        logger.warning(f"RetryAfter error: {e}")
-        time.sleep(e.retry_after)
-        return safe_send_message(context, chat_id, text, **kwargs)
-    except TelegramError as e:
-        logger.error(f"Telegram error: {e}")
-        return None
+        # بارگذاری session اگه وجود داشته باشه
+        if os.path.exists(SESSION_FILE):
+            print(f'بارگذاری session از {SESSION_FILE}')
+            ig_client.load_settings(SESSION_FILE)
+            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            print(f'با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) با session وارد شد.')
+        else:
+            print(f'در حال ورود به اینستاگرام با نام کاربری: {INSTAGRAM_USERNAME}')
+            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            print(f'با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد.')
+            ig_client.dump_settings(SESSION_FILE)  # ذخیره session بعد از ورود موفق
+            print(f'session با موفقیت در {SESSION_FILE} ذخیره شد.')
+    except TwoFactorRequired as e:
+        print('احراز هویت دو مرحله‌ای مورد نیاز است!')
+        try:
+            verification_code = input('لطفاً کد تأیید دو مرحله‌ای را وارد کنید: ').strip()
+            print(f'کد وارد شده: {verification_code}')
+            ig_client.two_factor_login(verification_code)
+            print(f'با موفقیت به اینستاگرام ({INSTAGRAM_USERNAME}) وارد شد (با 2FA).')
+            ig_client.dump_settings(SESSION_FILE)  # ذخیره session بعد از 2FA
+            print(f'session با موفقیت در {SESSION_FILE} ذخیره شد.')
+        except Exception as e:
+            print(f'خطا در تأیید کد دو مرحله‌ای: {str(e)}')
+            raise
+    except ClientError as e:
+        print(f'خطا در ورود به اینستاگرام: {str(e)}')
+        raise
+    except Exception as e:
+        print(f'خطای غیرمنتظره در ورود: {str(e)}')
+        raise
+
+
+# اجرای فرآیند ورود
+try:
+    login_with_session()
+except Exception as e:
+    print(f'ورود به اینستاگرام ناموفق بود: {str(e)}')
+    # در محیط render.com نباید برنامه متوقف شود
+    # exit(1)
 
 # تابع خوش‌آمدگویی
 def start(update: Update, context):
-    logger.info(f"User {update.effective_user.id} started the bot")
+    print(f'User {update.effective_user.id} started the bot')  # لاگ شروع
     if not check_membership(update, context):
         return
 
     keyboard = [
-        [InlineKeyboardButton("راهنمای استفاده", callback_data="help")],
-        [InlineKeyboardButton("پشتیبانی", callback_data="support")]
+        [InlineKeyboardButton('دریافت توکن اتصال به اینستاگرام', callback_data='get_token')],
+        [InlineKeyboardButton('راهنمای اتصال به اینستاگرام', callback_data='instagram_help')],
+        [InlineKeyboardButton('ارسال لینک مستقیم', callback_data='manual_link')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    safe_send_message(
-        context,
-        update.effective_chat.id,
-        "سلام! به ربات دانلود ویدیو خوش آمدید.\n\n"
-        "شما می‌توانید ویدیوهای اینستاگرام و یوتیوب را دانلود کنید.\n\n"
-        "لطفاً لینک ویدیوی اینستاگرام یا یوتیوب مورد نظر خود را ارسال کنید.",
+    update.message.reply_text(
+        'سلام! به ربات دانلود اینستاگرام خوش آمدید.\n\n'
+        'شما می‌توانید:\n'
+        '1️⃣ توکن اتصال به اینستاگرام دریافت کنید تا پست‌های شما به صورت خودکار دانلود شود\n'
+        '2️⃣ یا به صورت مستقیم لینک پست را ارسال کنید\n\n'
+        'لطفاً یکی از گزینه‌های زیر را انتخاب کنید:',
         reply_markup=reply_markup
     )
+
+
+# مدیریت دکمه‌ها
+def button_handler(update: Update, context):
+    query = update.callback_query
+    query.answer()
+    user_id = update.effective_user.id
+    print(f'Button clicked by user {user_id}: {query.data}')  # لاگ کلیک دکمه
+
+    if query.data == 'get_token':
+        token = db.register_user(user_id)
+        if token:
+            keyboard = [
+                [InlineKeyboardButton('راهنمای اتصال به اینستاگرام', callback_data='instagram_help')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            query.edit_message_text(
+                f'توکن شما:\n\n`{token}`\n\n'
+                'این توکن را در دایرکت اکانت اینستاگرام خود به پیج \'etehadtaskforce\' ارسال کنید.\n'
+                'پس از اتصال، هر پستی که در دایرکت برای این پیج Share کنید به صورت خودکار برای شما دانلود خواهد شد.\n\n'
+                'اگر مشکلی داشتید، از راهنما استفاده کنید!',
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            print(f'Token generated for user {user_id}: {token}')
+        else:
+            query.edit_message_text('خطا در تولید توکن. لطفاً دوباره تلاش کنید یا با ادمین تماس بگیرید.')
+            print(f'Error generating token for user {user_id}')
+
+
+    elif query.data == 'instagram_help':
+        query.edit_message_text(
+            '📱 **راهنمای اتصال به اینستاگرام:**\n\n'
+            '1. ابتدا دکمه \'دریافت توکن اتصال به اینستاگرام\' را بزنید و توکن خود را دریافت کنید.\n'
+            '2. به اینستاگرام بروید و به پیج \'etehadtaskforce\' پیام دهید.\n'
+            '3. توکن خود را در دایرکت ارسال کنید.\n'
+            '4. پس از تأیید توسط ربات، پیامی دریافت خواهید کرد.\n'
+            '5. حالا می‌توانید پست‌های اینستاگرام را در دایرکت این پیج Share کنید تا به‌صورت خودکار دانلود شوند.\n\n'
+            'برای بازگشت به منو اصلی، دستور /start را ارسال کنید.',
+            parse_mode='Markdown'
+        )
+        print(f'Help message sent to user {user_id}')
+
+    elif query.data == 'manual_link':
+        query.edit_message_text(
+            'لطفاً لینک پست یا ریل اینستاگرام خود را در چت ارسال کنید.\n'
+            'مثال: https://www.instagram.com/p/Cabc123/\n'
+            'ربات به‌صورت خودکار لینک را پردازش کرده و محتوا را برای شما ارسال خواهد کرد.'
+        )
+        print(f'Manual link instruction sent to user {user_id}')
 
 # تابع بررسی عضویت در کانال‌های اجباری
 def check_membership(update: Update, context) -> bool:
@@ -89,12 +171,12 @@ def check_membership(update: Update, context) -> bool:
 
     for channel in REQUIRED_CHANNELS:
         try:
-            member = context.bot.get_chat_member(chat_id=channel["chat_id"], user_id=user_id)
+            member = context.bot.get_chat_member(chat_id=channel['chat_id'], user_id=user_id)
             status = member.status
             if status not in ['member', 'administrator', 'creator']:
                 not_joined_channels.append(channel)
         except Exception as e:
-            logger.error(f"خطا در بررسی عضویت کاربر {user_id} در کانال {channel['username']}: {str(e)}")
+            print(f"خطا در بررسی عضویت کاربر {user_id} در کانال {channel['username']}: {str(e)}")
             not_joined_channels.append(channel)
 
     if not not_joined_channels:
@@ -105,743 +187,331 @@ def check_membership(update: Update, context) -> bool:
         keyboard.append([InlineKeyboardButton(text=f"عضویت در {channel['username']}", url=f"https://t.me/{channel['username'].replace('@', '')}")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    safe_send_message(
-        context,
-        update.effective_chat.id,
-        "برای استفاده از ربات، لطفا در کانال‌های زیر عضو شوید و سپس دوباره امتحان کنید:",
+    update.message.reply_text(
+        'برای استفاده از ربات، لطفا در کانال‌های زیر عضو شوید و سپس دوباره امتحان کنید:',
         reply_markup=reply_markup
     )
     return False
 
-# تابع جایگزین برای دانلود ویدیو با استفاده از requests
-def download_with_requests(url, output_path):
+# تابع دانلود و ارسال پست
+def process_and_send_post(media_id, telegram_id, context):
     try:
-        logger.info(f"تلاش برای دانلود با استفاده از requests: {url}")
-        
-        # استخراج اطلاعات ویدیو بدون دانلود
-        ydl_opts = {
-            'format': 'best[height<=480]',
-            'skip_download': True,
-            'quiet': True,
-            'no_warnings': True,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            },
-            'extractor_args': {'youtube': {'player_client': ['android']}},
-            # 'proxy': 'socks5://127.0.0.1:9050',  # استفاده از پروکسی Tor (اگر نصب باشد)
-        }
-        
-        # تلاش برای استفاده از چند پروکسی مختلف
-        proxies = [
-            None,  # بدون پروکسی
-            {'http': 'socks5://127.0.0.1:9050', 'https': 'socks5://127.0.0.1:9050'},  # Tor
-            {'http': 'http://free-proxy.cz:8080', 'https': 'http://free-proxy.cz:8080'},  # یک پروکسی عمومی
-            {'http': 'http://103.152.112.162:80', 'https': 'http://103.152.112.162:80'},
-            {'http': 'http://185.199.229.156:7492', 'https': 'http://185.199.229.156:7492'},
-            {'http': 'http://185.199.228.220:7300', 'https': 'http://185.199.228.220:7300'},
-            {'http': 'http://185.199.231.45:8382', 'https': 'http://185.199.231.45:8382'},
-            {'http': 'http://8.219.74.58:8080', 'https': 'http://8.219.74.58:8080'},
-        ]
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if not info:
-                raise Exception("اطلاعات ویدیو استخراج نشد")
-            
-            # پیدا کردن بهترین فرمت با کیفیت مناسب
-            formats = info.get('formats', [])
-            target_format = None
-            
-            # ابتدا فرمت‌های با کیفیت 480p را جستجو می‌کنیم
-            for fmt in formats:
-                if fmt.get('height') == 480 and fmt.get('ext') in ['mp4', 'webm']:
-                    target_format = fmt
-                    break
-            
-            # اگر فرمت 480p پیدا نشد، بهترین فرمت موجود را انتخاب می‌کنیم
-            if not target_format:
-                for fmt in formats:
-                    if fmt.get('ext') in ['mp4', 'webm']:
-                        if not target_format or (fmt.get('height', 0) <= 480 and fmt.get('height', 0) > target_format.get('height', 0)):
-                            target_format = fmt
-            
-            if not target_format:
-                raise Exception("هیچ فرمت مناسبی برای دانلود پیدا نشد")
-            
-            # دانلود ویدیو با استفاده از requests
-            video_url = target_format.get('url')
-            if not video_url:
-                raise Exception("URL ویدیو یافت نشد")
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                'Referer': 'https://www.youtube.com/',
-            }
-            
-            # تلاش با پروکسی‌های مختلف
-            last_error = None
-            for proxy in proxies:
+        print(f"شروع دانلود برای telegram_id: {telegram_id}, media_id: {media_id}")
+        if not os.path.exists("downloads"):
+            os.makedirs("downloads")
+            print(f"پوشه downloads ایجاد شد.")
+
+        L = instaloader.Instaloader(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
+            max_connection_attempts=3
+        )
+
+        # تبدیل media_id به shortcode
+        try:
+            media_info = ig_client.media_info(media_id)
+            shortcode = media_info.code
+            print(f"Shortcode استخراج‌شده: {shortcode}")
+        except Exception as e:
+            print(f"خطا در دریافت اطلاعات رسانه: {str(e)}")
+            context.bot.send_message(chat_id=telegram_id, text=f"خطا در پردازش رسانه: {str(e)}")
+            return
+
+        # دانلود پست
+        post = instaloader.Post.from_shortcode(L.context, shortcode)
+        print(f"دانلود فایل‌ها شروع شد: {post}")
+
+        L.download_post(post, target="downloads")
+        downloaded_files = os.listdir("downloads")
+        print(f"محتوای دانلود شده: {downloaded_files}")
+        if not downloaded_files:
+            context.bot.send_message(chat_id=telegram_id, text="هیچ فایلی دانلود نشد!")
+            return
+
+        # ارسال ویدیو با لینک قابل کلیک
+        video_sent = False
+        video_path = None
+        for file in downloaded_files:
+            file_path = os.path.join("downloads", file)
+            if file.endswith(".mp4") and not video_sent:
+                video_path = file_path
                 try:
-                    logger.info(f"تلاش دانلود با پروکسی: {proxy}")
-                    response = requests.get(video_url, headers=headers, proxies=proxy, stream=True, timeout=60)
-                    response.raise_for_status()
-                    
-                    # ذخیره فایل
-                    with open(output_path, 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                    
-                    return info.get('title', 'ویدیوی یوتیوب')
+                    with open(video_path, 'rb') as f:
+                        print(f"ارسال ویدیو: {video_path}, اندازه فایل: {os.path.getsize(video_path)} بایت")
+                        context.bot.send_video(
+                            chat_id=telegram_id,
+                            video=f,
+                            caption="[TaskForce](https://t.me/task_1_4_1_force)",
+                            parse_mode="Markdown",
+                            timeout=30  # افزایش زمان‌منتظر برای ارسال
+                        )
+                        video_sent = True
+                        print(f"ویدیو با موفقیت ارسال شد: {video_path}")
                 except Exception as e:
-                    last_error = e
-                    logger.warning(f"خطا در دانلود با پروکسی {proxy}: {str(e)}")
-                    continue
-            
-            # اگر همه پروکسی‌ها ناموفق بودند
-            if last_error:
-                raise last_error
-    
-    except Exception as e:
-        logger.error(f"خطا در دانلود با requests: {str(e)}")
-        raise
+                    print(f"خطا در ارسال ویدیو: {str(e)}")
+                    context.bot.send_message(chat_id=telegram_id, text=f"خطا در ارسال ویدیو: {str(e)}")
+                # فایل ویدیو رو بعد از ارسال حذف می‌کنیم
+                if os.path.exists(video_path) and video_sent:
+                    os.remove(video_path)
+                    print(f"فایل ویدیو حذف شد: {video_path}")
 
-# تابع دانلود ویدیو یوتیوب
-def download_youtube_video(url, update: Update, context):
-    try:
-        safe_send_message(context, update.effective_chat.id, "در حال دانلود ویدیوی یوتیوب... لطفاً صبر کنید.")
-        
-        # استفاده از پوشه موقت برای دانلود
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # تنظیمات yt-dlp برای یوتیوب با کیفیت 480p
-            ydl_opts = {
-                'format': 'best[height<=480]/worst[height>=480]/best',  # انتخاب کیفیت 480p یا نزدیک آن
-                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                'quiet': True,
-                'verbose': False,
-                'noplaylist': True,  # فقط یک ویدیو دانلود شود، نه پلی‌لیست
-                'retries': 10,
-                'socket_timeout': 60,
-                'nocheckcertificate': True,
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Referer': 'https://www.youtube.com/',
-                    'Origin': 'https://www.youtube.com',
-                },
-                'nocheckcertificate': True,
-                'no_warnings': True,
-                'ignoreerrors': False,
-                'skip_download': False,
-                'writethumbnail': False,
-                'geo_bypass': True,
-                'geo_bypass_country': 'US',
-                'prefer_ffmpeg': True,
-                'quiet_download': True,
-                'external_downloader_args': ['-loglevel', 'panic'],
-                'cookiefile': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookies.txt'),
-                'extractor_args': {'youtube': {'player_client': ['android']}},
-                'extractor_retries': 5,
-                # پروکسی را فقط در صورت نیاز فعال کنید
-                # 'proxy': 'socks5://127.0.0.1:9050',  # استفاده از پروکسی Tor (اگر نصب باشد)
-            }
-            
-            try:
-                logger.info(f"شروع دانلود ویدیوی یوتیوب از آدرس: {url}")
-                
-                # متغیر برای نگهداری عنوان ویدیو
-                title = "ویدیوی یوتیوب"
-                video_file = None
-                download_success = False
-                
-                # دانلود ویدیو
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        # تلاش دانلود با تنظیمات پیش‌فرض
-                        try:
-                            info = ydl.extract_info(url, download=True)
-                            title = info.get('title', 'ویدیوی یوتیوب')
-                            download_success = True
-                        except Exception as e:
-                            # اگر تلاش اول ناموفق بود، با تنظیمات متفاوت امتحان کنید
-                            logger.warning(f"دانلود اول ناموفق بود: {str(e)}. تلاش با تنظیمات دیگر...")
-                            
-                            # روش دوم: استفاده از فرمت متفاوت
-                            try:
-                                ydl_opts['format'] = 'best/worst'
-                                ydl_opts['extractor_args'] = {'youtube': {'player_client': ['web']}}
-                                with yt_dlp.YoutubeDL(ydl_opts) as ydl2:
-                                    info = ydl2.extract_info(url, download=True)
-                                    title = info.get('title', 'ویدیوی یوتیوب')
-                                    download_success = True
-                            except Exception as e2:
-                                logger.warning(f"دانلود دوم ناموفق بود: {str(e2)}. تلاش با روش سوم...")
-                                
-                                # روش سوم: استفاده از User-Agent متفاوت
-                                try:
-                                    ydl_opts['http_headers'] = {
-                                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
-                                        'Accept-Language': 'en-US,en;q=0.9',
-                                        'Referer': 'https://www.google.com/',
-                                    }
-                                    ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
-                                    with yt_dlp.YoutubeDL(ydl_opts) as ydl3:
-                                        info = ydl3.extract_info(url, download=True)
-                                        title = info.get('title', 'ویدیوی یوتیوب')
-                                        download_success = True
-                                except Exception as e3:
-                                    logger.warning(f"دانلود سوم ناموفق بود: {str(e3)}. تلاش با روش چهارم...")
-                                    
-                                    # روش چهارم: استفاده از پروکسی
-                                    try:
-                                        ydl_opts['proxy'] = 'socks5://127.0.0.1:9050'  # استفاده از پروکسی Tor
-                                        with yt_dlp.YoutubeDL(ydl_opts) as ydl4:
-                                            info = ydl4.extract_info(url, download=True)
-                                            title = info.get('title', 'ویدیوی یوتیوب')
-                                            download_success = True
-                                    except Exception as e4:
-                                        logger.warning(f"دانلود چهارم ناموفق بود: {str(e4)}. تلاش با روش requests...")
-                except Exception as e_all:
-                    logger.warning(f"همه تلاش‌های yt-dlp ناموفق بود: {str(e_all)}. تلاش با روش requests...")
-                
-                # اگر همه روش‌های yt-dlp ناموفق بود، از requests استفاده می‌کنیم
-                if not download_success:
-                    output_file = os.path.join(temp_dir, "youtube_video.mp4")
-                    title = download_with_requests(url, output_file)
-                    download_success = True
-                
-                # یافتن فایل دانلود شده
-                downloaded_files = os.listdir(temp_dir)
-                logger.info(f"فایل‌های موجود در پوشه موقت: {downloaded_files}")
-                
-                if not downloaded_files:
-                    raise Exception("هیچ فایلی دانلود نشد")
-                
-                # انتخاب فایل ویدیو
-                video_file = os.path.join(temp_dir, downloaded_files[0])
-                
-                # بررسی اندازه فایل (محدودیت تلگرام 50 مگابایت است)
-                file_size = os.path.getsize(video_file)
-                if file_size > 50 * 1024 * 1024:
-                    safe_send_message(
-                        context,
-                        update.effective_chat.id,
-                        "اندازه ویدیو بزرگتر از محدودیت تلگرام است. امکان ارسال وجود ندارد."
-                    )
-                    return
-                
-                logger.info(f"ارسال ویدیو: {video_file} (اندازه: {file_size} بایت)")
-                
-                # ارسال ویدیو به کاربر
-                try:
-                    with open(video_file, 'rb') as video_data:
-                        context.bot.send_video(
-                            chat_id=update.effective_chat.id,
-                            video=video_data,
-                            caption=f"🎥 {title}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                            parse_mode="Markdown"
-                        )
-                    logger.info(f"ویدیو با موفقیت ارسال شد")
-                except RetryAfter as e:
-                    logger.warning(f"خطای RetryAfter هنگام ارسال ویدیو: {e}")
-                    time.sleep(e.retry_after)
-                    with open(video_file, 'rb') as video_data:
-                        context.bot.send_video(
-                            chat_id=update.effective_chat.id,
-                            video=video_data,
-                            caption=f"🎥 {title}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                            parse_mode="Markdown"
-                        )
-                
-            except Exception as e:
-                logger.error(f"خطا در دانلود ویدیوی یوتیوب: {str(e)}")
-                safe_send_message(
-                    context,
-                    update.effective_chat.id,
-                    f"خطا در دانلود ویدیوی یوتیوب: لطفاً لینک دیگری امتحان کنید یا بعداً دوباره تلاش کنید."
-                )
-                
-    except Exception as e:
-        logger.error(f"خطای کلی در دانلود ویدیو: {str(e)}")
-        safe_send_message(
-            context,
-            update.effective_chat.id,
-            "خطا در دانلود ویدیو. لطفاً دوباره تلاش کنید."
-        )
-
-# تابع دانلود ویدیوی اینستاگرام
-def download_instagram_video(url, update: Update, context):
-    try:
-        safe_send_message(context, update.effective_chat.id, "در حال دانلود ویدیوی اینستاگرام... لطفاً صبر کنید.")
-        
-        # استفاده از پوشه موقت برای دانلود
-        with tempfile.TemporaryDirectory() as temp_dir:
-            try:
-                logger.info(f"شروع دانلود ویدیوی اینستاگرام از آدرس: {url}")
-                
-                # استخراج شناسه پست از URL
-                if 'instagram.com/p/' in url or 'instagram.com/reel/' in url:
-                    # استخراج شناسه پست
-                    post_id = None
-                    if '/p/' in url:
-                        post_id = url.split('/p/')[1].split('/')[0].split('?')[0]
-                    elif '/reel/' in url:
-                        post_id = url.split('/reel/')[1].split('/')[0].split('?')[0]
-                    
-                    if not post_id:
-                        raise Exception("شناسه پست اینستاگرام یافت نشد")
-                    
-                    logger.info(f"شناسه پست اینستاگرام: {post_id}")
-                    
-                    # متغیرها برای نگهداری اطلاعات ویدیو
-                    video_url = None
-                    caption = "ویدیوی اینستاگرام"
-                    video_file = os.path.join(temp_dir, f"instagram_video_{post_id}.mp4")
-                    download_success = False
-                    
-                    # روش جدید: استخراج پیشرفته‌تر ویدیو
-                    if not download_success:
-                        try:
-                            logger.info("تلاش برای استخراج پیشرفته‌تر ویدیو...")
-                            
-                            # استفاده از الگوهای مختلف برای یافتن ویدیو
-                            patterns = [
-                                r'"video_url":"([^"]+)"',
-                                r'"video_versions":\[{"type":\d+,"width":\d+,"height":\d+,"url":"([^"]+)"',
-                                r'<meta property="og:video" content="([^"]+)"',
-                                r'<video[^>]+src="([^"]+)"',
-                                r'<source[^>]+src="([^"]+)"'
-                            ]
-                            
-                            # دریافت HTML صفحه با هدرهای مختلف
-                            user_agents = [
-                                'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
-                                'Mozilla/5.0 (Android 12; Mobile; rv:68.0) Gecko/68.0 Firefox/96.0',
-                                'Instagram 219.0.0.12.117 Android'
-                            ]
-                            
-                            for user_agent in user_agents:
-                                headers = {
-                                    'User-Agent': user_agent,
-                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                                    'Accept-Language': 'en-US,en;q=0.5',
-                                    'Referer': 'https://www.instagram.com/',
-                                    'Origin': 'https://www.instagram.com'
-                                }
-                                
-                                response = requests.get(url, headers=headers)
-                                if response.status_code == 200:
-                                    html_content = response.text
-                                    
-                                    # جستجو با الگوهای مختلف
-                                    for pattern in patterns:
-                                        matches = re.findall(pattern, html_content)
-                                        if matches:
-                                            for match in matches:
-                                                video_url = match.replace('\\u0026', '&')
-                                                logger.info(f"لینک ویدیو از الگوی پیشرفته: {video_url}")
-                                                
-                                                try:
-                                                    # دانلود ویدیو
-                                                    response = requests.get(video_url, headers=headers, stream=True)
-                                                    response.raise_for_status()
-                                                    
-                                                    with open(video_file, 'wb') as f:
-                                                        for chunk in response.iter_content(chunk_size=8192):
-                                                            f.write(chunk)
-                                                    
-                                                    # بررسی اندازه فایل
-                                                    if os.path.getsize(video_file) > 10000:  # حداقل 10KB
-                                                        download_success = True
-                                                        break
-                                                except Exception as e:
-                                                    logger.warning(f"خطا در دانلود ویدیو از لینک استخراج شده: {str(e)}")
-                                        
-                                    if download_success:
-                                        break
-                        except Exception as e:
-                            logger.warning(f"خطا در استخراج پیشرفته‌تر ویدیو: {str(e)}")
-                    
-                    # روش جدید: استفاده از سرویس‌های API خارجی
-                    if not download_success:
-                        try:
-                            logger.info("تلاش برای دانلود با سرویس‌های API خارجی...")
-                            
-                            # چند سرویس مختلف را امتحان کنید
-                            api_services = [
-                                {
-                                    "url": f"https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index?url={url}",
-                                    "headers": {
-                                        "X-RapidAPI-Key": "YOUR_RAPIDAPI_KEY",  # نیاز به ثبت‌نام در RapidAPI
-                                        "X-RapidAPI-Host": "instagram-downloader-download-instagram-videos-stories.p.rapidapi.com"
-                                    }
-                                },
-                                {
-                                    "url": f"https://instagram-media-downloader.p.rapidapi.com/rapid/download.php?url={url}",
-                                    "headers": {
-                                        "X-RapidAPI-Key": "YOUR_RAPIDAPI_KEY",
-                                        "X-RapidAPI-Host": "instagram-media-downloader.p.rapidapi.com"
-                                    }
-                                }
-                            ]
-                            
-                            for service in api_services:
-                                try:
-                                    response = requests.get(service["url"], headers=service["headers"])
-                                    if response.status_code == 200:
-                                        data = response.json()
-                                        if data.get("video_url") or data.get("media") or data.get("url"):
-                                            video_url = data.get("video_url") or data.get("media") or data.get("url")
-                                            logger.info(f"لینک ویدیو از API خارجی: {video_url}")
-                                            
-                                            # دانلود ویدیو
-                                            response = requests.get(video_url, stream=True)
-                                            response.raise_for_status()
-                                            
-                                            with open(video_file, 'wb') as f:
-                                                for chunk in response.iter_content(chunk_size=8192):
-                                                    f.write(chunk)
-                                            
-                                            download_success = True
-                                            break
-                                except Exception as e:
-                                    logger.warning(f"خطا در استفاده از سرویس API خارجی: {str(e)}")
-                        except Exception as e:
-                            logger.warning(f"خطا در استفاده از سرویس‌های API خارجی: {str(e)}")
-                    
-                    # روش جدید: استفاده از سرویس‌های واسط
-                    if not download_success:
-                        try:
-                            logger.info("تلاش برای دانلود با سرویس‌های واسط...")
-                            
-                            # لیست سرویس‌های واسط
-                            proxy_services = [
-                                f"https://www.save-insta.com/api/ajaxSearch/index?q={url}",
-                                f"https://www.instagramsave.com/system/action.php?url={url}",
-                                f"https://saveinsta.app/api/ajaxSearch/index?q={url}",
-                                f"https://instadownloader.co/api/ajaxSearch/index?q={url}"
-                            ]
-                            
-                            for service_url in proxy_services:
-                                try:
-                                    headers = {
-                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                                        'Accept': 'application/json, text/javascript, */*; q=0.01',
-                                        'Referer': service_url.split('/api/')[0],
-                                        'X-Requested-With': 'XMLHttpRequest'
-                                    }
-                                    
-                                    response = requests.get(service_url, headers=headers)
-                                    if response.status_code == 200:
-                                        try:
-                                            data = response.json()
-                                            if data.get('medias'):
-                                                for media in data.get('medias'):
-                                                    if media.get('video'):
-                                                        video_url = media.get('video')
-                                                        logger.info(f"لینک ویدیو از سرویس واسط: {video_url}")
-                                                        
-                                                        # دانلود ویدیو
-                                                        response = requests.get(video_url, headers=headers, stream=True)
-                                                        response.raise_for_status()
-                                                        
-                                                        with open(video_file, 'wb') as f:
-                                                            for chunk in response.iter_content(chunk_size=8192):
-                                                                f.write(chunk)
-                                                        
-                                                        download_success = True
-                                                        break
-                                        except Exception as e:
-                                            logger.warning(f"خطا در پردازش پاسخ سرویس واسط: {str(e)}")
-                                    
-                                    if download_success:
-                                        break
-                                except Exception as e:
-                                    logger.warning(f"خطا در استفاده از سرویس واسط: {str(e)}")
-                        except Exception as e:
-                            logger.warning(f"خطا در استفاده از سرویس‌های واسط: {str(e)}")
-                    # روش اول: استفاده از instagrapi بدون لاگین
+        # ارسال کاور با کپشن پست اینستاگرامی و لینک
+        cover_sent = False
+        if post.caption and not cover_sent:
+            for file in downloaded_files:
+                file_path = os.path.join("downloads", file)
+                if file.endswith((".jpg", ".jpeg", ".png")) and not cover_sent:
                     try:
-                        logger.info("تلاش برای دانلود با instagrapi بدون لاگین...")
-                        cl = Client()
-                        
-                        # تلاش برای دانلود بدون لاگین
-                        try:
-                            # تبدیل شناسه کوتاه به شناسه عددی
-                            media_pk = cl.media_pk_from_code(post_id)
-                            logger.info(f"شناسه عددی پست: {media_pk}")
-                            
-                            # دانلود ویدیو
-                            media_path = cl.video_download(media_pk, temp_dir)
-                            logger.info(f"ویدیو با موفقیت دانلود شد: {media_path}")
-                            
-                            # دریافت اطلاعات پست
-                            try:
-                                media_info = cl.media_info(media_pk)
-                                caption = media_info.caption_text if media_info.caption_text else "ویدیوی اینستاگرام"
-                            except Exception as e:
-                                logger.warning(f"خطا در دریافت اطلاعات پست: {str(e)}")
-                            
-                            video_file = media_path
-                            download_success = True
-                        except LoginRequired:
-                            logger.warning("نیاز به لاگین برای دانلود با instagrapi. تلاش با روش دیگر...")
-                        except Exception as e:
-                            logger.warning(f"خطا در دانلود با instagrapi: {str(e)}")
+                        with open(file_path, 'rb') as f:
+                            print(f"ارسال کاور: {file_path}, اندازه فایل: {os.path.getsize(file_path)} بایت")
+                            context.bot.send_photo(
+                                chat_id=telegram_id,
+                                photo=f,
+                                caption=f"{post.caption}\n[TaskForce](https://t.me/task_1_4_1_force)",
+                                parse_mode="Markdown",
+                                timeout=30  # افزایش زمان‌منتظر برای ارسال
+                            )
+                            cover_sent = True
+                            print(f"کاور با موفقیت ارسال شد: {file_path}")
                     except Exception as e:
-                        logger.warning(f"خطا در استفاده از instagrapi: {str(e)}")
-                    
-                    # روش دوم: استفاده از requests و BeautifulSoup
-                    if not download_success:
-                        try:
-                            logger.info("تلاش برای دانلود با روش مستقیم...")
-                            headers = {
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                                'Accept-Language': 'en-US,en;q=0.5',
-                            }
-                            
-                            # تلاش برای دریافت عنوان ویدیو
-                            try:
-                                api_url = f"https://api.instagram.com/oembed/?url={url}"
-                                response = requests.get(api_url, headers=headers)
-                                if response.status_code == 200:
-                                    data = response.json()
-                                    caption = data.get('title', 'ویدیوی اینستاگرام')
-                            except Exception as e:
-                                logger.warning(f"خطا در دریافت اطلاعات از API اینستاگرام: {str(e)}")
-                            
-                            # روش مستقیم: استخراج لینک ویدیو از HTML
-                            response = requests.get(url, headers=headers)
-                            if response.status_code == 200:
-                                html_content = response.text
-                                
-                                # جستجوی لینک ویدیو در HTML
-                                video_pattern = r'<meta property="og:video" content="([^"]+)"'
-                                video_match = re.search(video_pattern, html_content)
-                                
-                                if video_match:
-                                    video_url = video_match.group(1)
-                                    logger.info(f"لینک ویدیو از HTML: {video_url}")
-                                else:
-                                    # جستجوی لینک ویدیو در JSON داده‌های صفحه
-                                    json_pattern = r'<script type="application/ld\+json">(.+?)</script>'
-                                    json_match = re.search(json_pattern, html_content, re.DOTALL)
-                                    
-                                    if json_match:
-                                        try:
-                                            json_data = json.loads(json_match.group(1))
-                                            if json_data.get('video'):
-                                                video_url = json_data.get('video').get('contentUrl')
-                                                logger.info(f"لینک ویدیو از JSON: {video_url}")
-                                        except Exception as e:
-                                            logger.warning(f"خطا در پردازش JSON: {str(e)}")
-                                
-                                # جستجوی لینک ویدیو در تگ‌های ویدیو
-                                if not video_url:
-                                    soup = BeautifulSoup(html_content, 'html.parser')
-                                    video_tags = soup.find_all('video')
-                                    for video_tag in video_tags:
-                                        if video_tag.get('src'):
-                                            video_url = video_tag.get('src')
-                                            logger.info(f"لینک ویدیو از تگ ویدیو: {video_url}")
-                                            break
-                            
-                            # اگر لینک ویدیو پیدا شد، آن را دانلود کنید
-                            if video_url:
-                                response = requests.get(video_url, headers=headers, stream=True)
-                                response.raise_for_status()
-                                
-                                with open(video_file, 'wb') as f:
-                                    for chunk in response.iter_content(chunk_size=8192):
-                                        f.write(chunk)
-                                
-                                download_success = True
-                        except Exception as e:
-                            logger.warning(f"خطا در دانلود با روش مستقیم: {str(e)}")
-                    
-                    # روش سوم: استفاده از سرویس‌های دانلود آنلاین
-                    if not download_success:
-                        try:
-                            logger.info("تلاش برای دانلود با سرویس SaveFrom.net...")
-                            savefrom_url = f"https://worker.sf-tools.com/savefrom.php?url={url}"
-                            savefrom_headers = {
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                                'Origin': 'https://en.savefrom.net',
-                                'Referer': 'https://en.savefrom.net/',
-                            }
-                            
-                            savefrom_response = requests.post(
-                                savefrom_url,
-                                headers=savefrom_headers,
-                                data=f"sf_url={url}&sf_submit=&new=2&lang=en&app=&country=&os=Windows&browser=Chrome&channel=&sf-nomad=1"
-                            )
-                            
-                            if savefrom_response.status_code == 200:
-                                savefrom_data = savefrom_response.json()
-                                if savefrom_data.get('url'):
-                                    for item in savefrom_data.get('url', []):
-                                        if item.get('url') and item.get('type') == 'mp4':
-                                            video_url = item.get('url')
-                                            logger.info(f"لینک ویدیو از SaveFrom.net: {video_url}")
-                                            
-                                            # دانلود ویدیو
-                                            response = requests.get(video_url, headers=savefrom_headers, stream=True)
-                                            response.raise_for_status()
-                                            
-                                            with open(video_file, 'wb') as f:
-                                                for chunk in response.iter_content(chunk_size=8192):
-                                                    f.write(chunk)
-                                            
-                                            download_success = True
-                                            break
-                        except Exception as e:
-                            logger.warning(f"خطا در استفاده از سرویس SaveFrom.net: {str(e)}")
-                    
-                    # اگر هیچ یک از روش‌ها موفق نبود
-                    if not download_success:
-                        raise Exception("دانلود ویدیو با همه روش‌ها ناموفق بود")
-                    
-                    # بررسی اندازه فایل (محدودیت تلگرام 50 مگابایت است)
-                    file_size = os.path.getsize(video_file)
-                    if file_size > 50 * 1024 * 1024:
-                        safe_send_message(
-                            context,
-                            update.effective_chat.id,
-                            "اندازه ویدیو بزرگتر از محدودیت تلگرام است. امکان ارسال وجود ندارد."
-                        )
-                        return
-                    
-                    logger.info(f"ارسال ویدیو: {video_file} (اندازه: {file_size} بایت)")
-                    
-                    # ارسال ویدیو به کاربر
-                    try:
-                        with open(video_file, 'rb') as video_data:
-                            context.bot.send_video(
-                                chat_id=update.effective_chat.id,
-                                video=video_data,
-                                caption=f"🎥 {caption}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                                parse_mode="Markdown"
-                            )
-                        logger.info(f"ویدیو با موفقیت ارسال شد")
-                    except RetryAfter as e:
-                        logger.warning(f"خطای RetryAfter هنگام ارسال ویدیو: {e}")
-                        time.sleep(e.retry_after)
-                        with open(video_file, 'rb') as video_data:
-                            context.bot.send_video(
-                                chat_id=update.effective_chat.id,
-                                video=video_data,
-                                caption=f"🎥 {caption}\n\n[TaskForce](https://t.me/task_1_4_1_force)",
-                                parse_mode="Markdown"
-                            )
-                else:
-                    raise Exception("لینک اینستاگرام نامعتبر است. لطفاً یک لینک پست یا ریل اینستاگرام ارسال کنید.")
-                
-            except Exception as e:
-                logger.error(f"خطا در دانلود ویدیوی اینستاگرام: {str(e)}")
-                safe_send_message(
-                    context,
-                    update.effective_chat.id,
-                    f"خطا در دانلود ویدیوی اینستاگرام: لطفاً لینک دیگری امتحان کنید یا بعداً دوباره تلاش کنید."
-                )
-                
-    except Exception as e:
-        logger.error(f"خطای کلی در دانلود ویدیو: {str(e)}")
-        safe_send_message(
-            context,
-            update.effective_chat.id,
-            "خطا در دانلود ویدیو. لطفاً دوباره تلاش کنید."
-        )
+                        print(f"خطا در ارسال کاور: {str(e)}")
+                        context.bot.send_message(chat_id=telegram_id, text=f"خطا در ارسال کاور: {str(e)}")
+                    if os.path.exists(file_path) and cover_sent:
+                        os.remove(file_path)
+                        print(f"فایل کاور حذف شد: {file_path}")
+                    break
 
-# تابع پردازش لینک
+        # حذف فایل‌های باقیمانده
+        for file in downloaded_files:
+            file_path = os.path.join("downloads", file)
+            if os.path.exists(file_path) and file_path not in [video_path if video_sent else None, file_path if cover_sent else None]:
+                os.remove(file_path)
+                print(f"فایل اضافی حذف شد: {file_path}")
+
+        if video_sent or cover_sent:
+            context.bot.send_message(chat_id=telegram_id, text="محتوای شما با موفقیت ارسال شد.")
+        else:
+            context.bot.send_message(chat_id=telegram_id, text="هیچ فایلی برای ارسال پیدا نشد!")
+
+    except Exception as e:
+        print(f"خطا کلی در دانلود و ارسال: {str(e)}")
+        context.bot.send_message(chat_id=telegram_id, text=f"خطا کلی در دانلود: {str(e)}")
+
+# تابع دانلود و ارسال استوری
+def process_and_send_story(story_id, telegram_id, context):
+    try:
+        print(f"شروع دانلود استوری برای telegram_id: {telegram_id}, story_id: {story_id}")
+        media = ig_client.story_info(story_id)
+        if media:
+            video_url = getattr(media, 'video_url', None)
+            photo_url = getattr(media, 'thumbnail_url', None)
+            if video_url:
+                context.bot.send_message(chat_id=telegram_id, text="در حال دانلود استوری...")
+                context.bot.send_video(chat_id=telegram_id, video=video_url, caption="استوری شما")
+            elif photo_url:
+                context.bot.send_message(chat_id=telegram_id, text="در حال دانلود استوری...")
+                context.bot.send_photo(chat_id=telegram_id, photo=photo_url, caption="استوری شما")
+            else:
+                context.bot.send_message(chat_id=telegram_id, text="استوری مورد نظر قابل دانلود نیست.")
+        else:
+            context.bot.send_message(chat_id=telegram_id, text="استوری مورد نظر پیدا نشد.")
+    except Exception as e:
+        print(f"خطا در دانلود استوری: {str(e)}")
+        context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود استوری: {str(e)}")
+
+# تابع چک کردن دایرکت‌ها
+def check_instagram_dms(context):
+    while True:
+        try:
+            print("چک کردن دایرکت‌ها...")
+            inbox = ig_client.direct_threads(amount=50)
+            print(f"تعداد دایرکت‌ها: {len(inbox)}")
+            for thread in inbox:
+                for message in thread.messages:
+                    if not db.is_message_processed(message.id):
+                        sender_id = message.user_id
+                        print(f"پیام جدید پیدا شد: نوع پیام: {message.item_type}, از کاربر: {sender_id}")
+                        db.mark_message_processed(message.id)
+
+                        if message.item_type == "text":
+                            text = message.text
+                            telegram_id = db.get_telegram_id_by_token(text)
+                            if telegram_id:
+                                print(f"توکن معتبر پیدا شد: {text}, telegram_id: {telegram_id}")
+                                ig_client.direct_send("توکن شما تأیید شد. از این پس هر پست و استوری که در دایرکت Share کنید در تلگرام دریافت می‌کنید.", user_ids=[sender_id])
+                                context.bot.send_message(chat_id=telegram_id, text="پیج اینستاگرام شما متصل شد.")
+                                sender_info = ig_client.user_info(sender_id)
+                                instagram_username = sender_info.username
+                                print(f"ثبت instagram_username: {instagram_username} برای telegram_id: {telegram_id}")
+                                db.update_instagram_username(telegram_id, instagram_username)
+                                continue
+
+                        if message.item_type in ["media_share", "clip"]:
+                            print(f"پست/کلیپ Share شده پیدا شد: media_id: {message.media_share.id if message.item_type == 'media_share' else message.clip.id}")
+                            sender_info = ig_client.user_info(sender_id)
+                            instagram_username = sender_info.username
+                            telegram_id = db.get_telegram_id_by_instagram_username(instagram_username)
+                            if telegram_id:
+                                print(f"کاربر تأیید شده: instagram_username: {instagram_username}, telegram_id: {telegram_id}")
+                                media_id = message.media_share.id if message.item_type == 'media_share' else message.clip.id
+                                threading.Thread(
+                                    target=process_and_send_post,
+                                    args=(media_id, telegram_id, context)
+                                ).start()
+                                ig_client.direct_send("پست/کلیپ Share شده شما دریافت شد و در حال پردازش است.", user_ids=[sender_id])
+                            else:
+                                print(f"کاربر پیدا نشد: instagram_username: {instagram_username}")
+
+                        if message.item_type == "story_share":
+                            print(f"استوری Share شده پیدا شد: story_id: {message.story_share.id}")
+                            sender_info = ig_client.user_info(sender_id)
+                            instagram_username = sender_info.username
+                            telegram_id = db.get_telegram_id_by_instagram_username(instagram_username)
+                            if telegram_id:
+                                print(f"کاربر تأیید شده: instagram_username: {instagram_username}, telegram_id: {telegram_id}")
+                                threading.Thread(
+                                    target=process_and_send_story,
+                                    args=(message.story_share.id, telegram_id, context)
+                                ).start()
+                                ig_client.direct_send("استوری Share شده شما دریافت شد و در حال پردازش است.", user_ids=[sender_id])
+                            else:
+                                print(f"کاربر پیدا نشد: instagram_username: {instagram_username}")
+
+        except Exception as e:
+            print(f"خطا در چک کردن دایرکت‌ها: {str(e)}")
+        time.sleep(30)
+
+# تابع دریافت لینک مستقیم (هماهنگ با دایرکت)
 def handle_link(update: Update, context):
+    print(f"Received message: {update.message.text}")  # لاگ برای چک کردن دریافت پیام
     if not check_membership(update, context):
         return
 
     url = update.message.text
-    logger.info(f"Received URL: {url}")
+    print(f"Received URL: {url}")  # لاگ برای چک کردن لینک دریافت‌شده
+    if "instagram.com" in url:
+        update.message.reply_text("در حال دانلود... لطفا منتظر بمانید!")
+        try:
+            # استخراج shortcode از لینک
+            if "/p/" in url:
+                shortcode = url.split("/p/")[1].split("/")[0]
+            elif "/reel/" in url:
+                shortcode = url.split("/reel/")[1].split("/")[0]
+            else:
+                parts = url.strip('/').split('/')
+                shortcode = parts[-1] if parts[-1] else parts[-2]
+            if "?" in shortcode:
+                shortcode = shortcode.split("?")[0]
+            print(f"Extracted Shortcode: {shortcode}")  # لاگ برای چک کردن Shortcode
 
-    # بررسی لینک اینستاگرام
-    if any(domain in url.lower() for domain in ['instagram.com']):
-        threading.Thread(target=download_instagram_video, args=(url, update, context)).start()
-    # بررسی لینک یوتیوب
-    elif any(domain in url.lower() for domain in ['youtube.com', 'youtu.be']):
-        threading.Thread(target=download_youtube_video, args=(url, update, context)).start()
+            # تبدیل shortcode به media_id
+            media_id = ig_client.media_pk_from_code(shortcode)
+            print(f"Extracted Media ID: {media_id}")  # لاگ برای چک کردن media_id
+
+            # پردازش مثل دایرکت (استفاده از media_id مستقیم)
+            telegram_id = update.effective_user.id
+            threading.Thread(
+                target=process_and_send_post,
+                args=(media_id, telegram_id, context)
+            ).start()
+            update.message.reply_text("پست شما دریافت شد و در حال پردازش است.")
+
+        except Exception as e:
+            print(f"Error processing link: {str(e)}")  # لاگ خطا
+            update.message.reply_text(f"خطا در پردازش لینک: {str(e)}")
     else:
-        safe_send_message(context, update.effective_chat.id, "لطفاً یک لینک معتبر از اینستاگرام یا یوتیوب ارسال کنید.")
+        update.message.reply_text("لطفاً یه لینک معتبر از اینستاگرام ارسال کنید.")
 
-# مدیریت دکمه‌ها
-def button_handler(update: Update, context):
+# تابع پنل ادمین
+def admin(update: Update, context):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        update.message.reply_text("شما دسترسی به این بخش را ندارید!")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("مشاهده کاربران", callback_data="view_users")],
+        [InlineKeyboardButton("ارسال پیام همگانی", callback_data="broadcast")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text("پنل ادمین:\nلطفاً گزینه مورد نظر را انتخاب کنید:", reply_markup=reply_markup)
+
+# مدیریت دکمه‌های پنل ادمین
+def admin_button_handler(update: Update, context):
     query = update.callback_query
     query.answer()
 
-    if query.data == "help":
-        query.edit_message_text(
-            "📱 **راهنمای استفاده از ربات:**\n\n"
-            "1. لینک ویدیوی مورد نظر خود را از اینستاگرام یا یوتیوب کپی کنید\n"
-            "2. لینک را در چت ربات ارسال کنید\n"
-            "3. ربات به صورت خودکار ویدیو را دانلود و برای شما ارسال می‌کند\n\n"
-            "**لینک‌های پشتیبانی شده:**\n"
-            "- لینک پست اینستاگرام (مثال: https://www.instagram.com/p/ABC123/)\n"
-            "- لینک ریل اینستاگرام (مثال: https://www.instagram.com/reel/ABC123/)\n"
-            "- لینک ویدیوی یوتیوب (مثال: https://youtu.be/ABC123 یا https://www.youtube.com/watch?v=ABC123)\n\n"
-            "نکته: برای استفاده از ربات باید در کانال‌های اجباری عضو باشید.",
-            parse_mode="Markdown"
-        )
-    elif query.data == "support":
-        query.edit_message_text(
-            "برای پشتیبانی با ادمین در ارتباط باشید:\n"
-            "@task_1_4_1_force"
-        )
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        query.edit_message_text("شما دسترسی به این بخش را ندارید!")
+        return
 
-# تابع مدیریت خطا
-def error_handler(update: Update, context):
-    logger.error(f"Update {update} caused error: {context.error}")
-    if update and update.effective_message:
-        safe_send_message(
-            context,
-            update.effective_chat.id,
-            "متأسفانه خطایی رخ داد. لطفاً دوباره تلاش کنید."
-        )
+    if query.data == "view_users":
+        conn = sqlite3.connect('database.db')
+        c = conn.cursor()
+        c.execute("SELECT telegram_id, instagram_username FROM users")
+        users = c.fetchall()
+        conn.close()
+        if users:
+            user_list = "\n".join([f"ID: {user[0]}, Instagram: {user[1] or 'N/A'}" for user in users])
+            query.edit_message_text(f"لیست کاربران:\n{user_list}")
+        else:
+            query.edit_message_text("هیچ کاربری ثبت نشده است.")
+
+    elif query.data == "broadcast":
+        query.edit_message_text("لطفاً متن پیام همگانی را ارسال کنید.")
+        context.user_data['state'] = 'awaiting_broadcast'
+
+# دریافت پیام همگانی
+def handle_message(update: Update, context):
+    if 'state' in context.user_data and context.user_data['state'] == 'awaiting_broadcast':
+        if update.effective_user.id != ADMIN_ID:
+            update.message.reply_text("شما دسترسی به این بخش را ندارید!")
+            return
+        message_text = update.message.text
+        conn = sqlite3.connect('database.db')
+        c = conn.cursor()
+        c.execute("SELECT telegram_id FROM users")
+        users = c.fetchall()
+        conn.close()
+        for user in users:
+            try:
+                context.bot.send_message(chat_id=user[0], text=message_text)
+            except Exception as e:
+                print(f"خطا در ارسال پیام به کاربر {user[0]}: {str(e)}")
+        update.message.reply_text("پیام همگانی با موفقیت ارسال شد.")
+        del context.user_data['state']
+
+# تابع دیباگ برای تست دریافت پیام
+def debug_handler(update: Update, context):
+    print(f"Debug: Received any message: {update.message.text}")
 
 # تابع اصلی
 def main():
-    global bot_instance
-    
-    # بررسی وجود نمونه قبلی
-    if bot_instance:
-        logger.warning("Bot is already running!")
-        return
-    
-    try:
-        logger.info("Bot is starting...")
-        
-        # راه‌اندازی وب‌سرور برای نگه داشتن ربات در حالت فعال
-        keep_alive()
-        
-        bot_instance = Updater(TOKEN, use_context=True)
-        dispatcher = bot_instance.dispatcher
+    print("Bot is starting...")
 
-        # ثبت handlerها
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
-        dispatcher.add_handler(CallbackQueryHandler(button_handler))
+    # راه اندازی Flask در یک thread جداگانه
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
 
-        # اضافه کردن error handler
-        dispatcher.add_error_handler(error_handler)
+    # راه اندازی تلگرام بات
+    updater = Updater(TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
 
-        # شروع ربات
-        bot_instance.start_polling(drop_pending_updates=True)
+    # ثبت handlerها
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
+    dispatcher.add_handler(CommandHandler("admin", admin))
+    dispatcher.add_handler(CallbackQueryHandler(button_handler))
+    dispatcher.add_handler(CallbackQueryHandler(admin_button_handler))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    dispatcher.add_handler(MessageHandler(Filters.all, debug_handler))
 
-        logger.info("Bot started successfully!")
-        bot_instance.idle()
+    # شروع چک کردن دایرکت اینستاگرام
+    instagram_thread = threading.Thread(target=check_instagram_dms, args=(dispatcher,), daemon=True)
+    instagram_thread.start()
 
-    except Exception as e:
-        logger.error(f"Error starting bot: {e}")
-        cleanup()
-        sys.exit(1)
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
