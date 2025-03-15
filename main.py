@@ -612,7 +612,7 @@ def main():
 
     # استفاده از polling به جای webhook برای سادگی و اجتناب از تداخل پورت
     print("Starting bot with polling mode...")
-    updater.start_polling()
+    updater.start_polling(clean=True)
     
     updater.idle()
 
