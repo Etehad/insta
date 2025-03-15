@@ -1,1 +1,1 @@
-web: python main.py
+web: FLASK_PORT=$PORT python main.py
