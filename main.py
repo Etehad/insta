@@ -15,7 +15,7 @@ from api import start_api_server
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# توکن ربات تلگرام و تنظیمات اینستاگرام از متغیرهای محیطی
+# توکن و تنظیمات از متغیرهای محیطی
 TOKEN = os.getenv("TELEGRAM_TOKEN", "7872003751:AAForhz28960IHKBJoZUoymEvDpU_u85JKQ")
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "etehadtaskforce")
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "Aa123456")
@@ -160,10 +160,20 @@ def process_and_send_post(media_id, telegram_id, context):
         if not os.path.exists("downloads"):
             os.makedirs("downloads")
 
+        # چک کردن دسترسی به پست با instagrapi
         media_info = ig_client.media_info(media_id)
+        if not media_info:
+            raise ValueError("Post not found or inaccessible")
+
         shortcode = media_info.code
-        post = instaloader.Post.from_shortcode(L.context, shortcode)
-        L.download_post(post, target="downloads")
+        try:
+            post = instaloader.Post.from_shortcode(L.context, shortcode)
+            if not post:
+                raise ValueError("Post metadata unavailable")
+            L.download_post(post, target="downloads")
+        except instaloader.exceptions.InstaloaderException as e:
+            logger.error(f"Instaloader error: {str(e)}")
+            raise ValueError(f"Fetching Post metadata failed: {str(e)}")
 
         downloaded_files = os.listdir("downloads")
         video_sent = False
@@ -198,6 +208,7 @@ def process_and_send_post(media_id, telegram_id, context):
                     os.remove(file_path)
                     break
 
+        # پاک کردن فایل‌های باقی‌مونده
         for file in downloaded_files:
             file_path = os.path.join("downloads", file)
             if os.path.exists(file_path):
@@ -208,9 +219,12 @@ def process_and_send_post(media_id, telegram_id, context):
         else:
             context.bot.send_message(chat_id=telegram_id, text="هیچ فایلی برای ارسال پیدا نشد!")
 
+    except ValueError as ve:
+        logger.error(f"ValueError in download/send: {str(ve)}")
+        context.bot.send_message(chat_id=telegram_id, text=f"خطا: {str(ve)}. ممکنه پست خصوصی باشه یا وجود نداشته باشه.")
     except Exception as e:
         logger.error(f"Error in download/send: {str(e)}")
-        context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود: {str(e)}")
+        context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود: {str(e)}. لطفاً دوباره تلاش کنید.")
 
 # دانلود و ارسال استوری
 def process_and_send_story(story_id, telegram_id, context):
@@ -263,10 +277,10 @@ def check_instagram_dms(context):
                                     threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
                                     ig_client.direct_send("پست/کلیپ شما در حال پردازش است.", user_ids=[sender_id])
 
-                        elif message.item_type == "story_share":
+                        elif message.item_type == "story_share" and message.story_share:
                             sender_info = ig_client.user_info(sender_id)
                             telegram_id = db.get_telegram_id_by_instagram_username(sender_info.username)
-                            if telegram_id and message.story_share:
+                            if telegram_id:
                                 story_id = message.story_share.id
                                 if story_id and story_id != "0":
                                     threading.Thread(target=process_and_send_story, args=(story_id, telegram_id, context)).start()
@@ -274,7 +288,7 @@ def check_instagram_dms(context):
 
         except Exception as e:
             logger.error(f"Error checking DMs: {str(e)}")
-        time.sleep(10)
+        time.sleep(30)
 
 # دریافت لینک مستقیم
 def handle_link(update: Update, context):
