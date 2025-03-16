@@ -49,6 +49,10 @@ def login_with_session(updater=None):
             L.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
             L.save_session_to_file(SESSION_FILE)
         logger.info(f"Logged into Instagram ({INSTAGRAM_USERNAME})")
+        
+        # تست لاگین instaloader
+        profile = L.check_profile_id(INSTAGRAM_USERNAME)
+        logger.info(f"Instaloader logged in as {profile.username}")
     except TwoFactorRequired:
         logger.error("Two-factor authentication required!")
         if updater:
@@ -57,7 +61,6 @@ def login_with_session(updater=None):
     except Exception as e:
         logger.error(f"Instagram login failed: {str(e)}")
         raise
-
 # تابع خوش‌آمدگویی
 def start(update: Update, context):
     logger.info(f"User {update.effective_user.id} started the bot")
