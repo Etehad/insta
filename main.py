@@ -74,8 +74,8 @@ def start(update: Update, context):
     update.message.reply_text(
         "سلام! به ربات دانلود اینستاگرام خوش آمدید.\n\n"
         "شما می‌توانید:\n"
-        "1️⃣ توکن اتصال به اینستاگرام دریافت کنید تا پست‌های شما به صورت خودکار دانلود شود\n"
-        "2️⃣ یا به صورت مستقیم لینک پست را ارسال کنید\n\n"
+        "1️⃣ توکن اتصال به اینستاگرام دریافت کنید تا پست‌ها و ریل‌های شما به صورت خودکار دانلود شود\n"
+        "2️⃣ یا به صورت مستقیم لینک پست/ریل را ارسال کنید\n\n"
         "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
         reply_markup=reply_markup
     )
@@ -97,7 +97,7 @@ def button_handler(update: Update, context):
             query.edit_message_text(
                 f"توکن شما:\n\n`{token}`\n\n"
                 "این توکن را در دایرکت اکانت اینستاگرام خود به پیج 'etehadtaskforce' ارسال کنید.\n"
-                "پس از اتصال، هر پستی که در دایرکت برای این پیج Share کنید به صورت خودکار برای شما دانلود خواهد شد.\n\n"
+                "پس از اتصال، هر پست یا ریل که در دایرکت برای این پیج Share کنید به صورت خودکار برای شما دانلود خواهد شد.\n\n"
                 "اگر مشکلی داشتید، از راهنما استفاده کنید!",
                 parse_mode="Markdown",
                 reply_markup=reply_markup
@@ -114,7 +114,7 @@ def button_handler(update: Update, context):
             "2. به اینستاگرام بروید و به پیج 'etehadtaskforce' پیام دهید.\n"
             "3. توکن خود را در دایرکت ارسال کنید.\n"
             "4. پس از تأیید توسط ربات، پیامی دریافت خواهید کرد.\n"
-            "5. حالا می‌توانید پست‌های اینستاگرام را در دایرکت این پیج Share کنید تا به‌صورت خودکار دانلود شوند.\n\n"
+            "5. حالا می‌توانید پست‌ها و ریل‌های اینستاگرام را در دایرکت این پیج Share کنید تا به‌صورت خودکار دانلود شوند.\n\n"
             "برای بازگشت به منو اصلی، دستور /start را ارسال کنید.",
             parse_mode="Markdown"
         )
@@ -123,7 +123,7 @@ def button_handler(update: Update, context):
     elif query.data == "manual_link":
         query.edit_message_text(
             "لطفاً لینک پست یا ریل اینستاگرام خود را در چت ارسال کنید.\n"
-            "مثال: https://www.instagram.com/p/Cabc123/\n"
+            "مثال: https://www.instagram.com/p/Cabc123/ یا https://www.instagram.com/reel/xyz/\n"
             "ربات به‌صورت خودکار لینک را پردازش کرده و محتوا را برای شما ارسال خواهد کرد."
         )
         logger.info(f"Manual link instruction sent to user {user_id}")
@@ -150,7 +150,7 @@ def check_membership(update: Update, context) -> bool:
     update.message.reply_text("برای استفاده از ربات، لطفاً در کانال‌های زیر عضو شوید:", reply_markup=reply_markup)
     return False
 
-# دانلود و ارسال پست
+# دانلود و ارسال پست یا ریل
 def process_and_send_post(media_id, telegram_id, context):
     try:
         if not media_id or media_id == "0":
@@ -160,20 +160,23 @@ def process_and_send_post(media_id, telegram_id, context):
         if not os.path.exists("downloads"):
             os.makedirs("downloads")
 
-        # چک کردن دسترسی به پست با instagrapi
+        # گرفتن اطلاعات رسانه با instagrapi
         media_info = ig_client.media_info(media_id)
         if not media_info:
-            raise ValueError("Post not found or inaccessible")
+            raise ValueError("Post/Reel not found or inaccessible")
 
         shortcode = media_info.code
+        media_type = media_info.media_type  # 1 = عکس، 2 = ویدیو/ریل، 8 = آلبوم
+
+        # دانلود با instaloader
         try:
             post = instaloader.Post.from_shortcode(L.context, shortcode)
             if not post:
-                raise ValueError("Post metadata unavailable")
+                raise ValueError("Post/Reel metadata unavailable")
             L.download_post(post, target="downloads")
         except instaloader.exceptions.InstaloaderException as e:
             logger.error(f"Instaloader error: {str(e)}")
-            raise ValueError(f"Fetching Post metadata failed: {str(e)}")
+            raise ValueError(f"Fetching Post/Reel metadata failed: {str(e)}")
 
         downloaded_files = os.listdir("downloads")
         video_sent = False
@@ -192,7 +195,7 @@ def process_and_send_post(media_id, telegram_id, context):
                 os.remove(file_path)
 
         cover_sent = False
-        if post.caption and not cover_sent:
+        if post.caption and not cover_sent and media_type != 2:  # برای ریل‌ها فقط ویدیو می‌فرستیم
             for file in downloaded_files:
                 file_path = os.path.join("downloads", file)
                 if file.endswith((".jpg", ".jpeg", ".png")) and not cover_sent:
@@ -215,13 +218,13 @@ def process_and_send_post(media_id, telegram_id, context):
                 os.remove(file_path)
 
         if video_sent or cover_sent:
-            context.bot.send_message(chat_id=telegram_id, text="محتوای شما با موفقیت ارسال شد.")
+            context.bot.send_message(chat_id=telegram_id, text="محتوای شما (پست یا ریل) با موفقیت ارسال شد.")
         else:
             context.bot.send_message(chat_id=telegram_id, text="هیچ فایلی برای ارسال پیدا نشد!")
 
     except ValueError as ve:
         logger.error(f"ValueError in download/send: {str(ve)}")
-        context.bot.send_message(chat_id=telegram_id, text=f"خطا: {str(ve)}. ممکنه پست خصوصی باشه یا وجود نداشته باشه.")
+        context.bot.send_message(chat_id=telegram_id, text=f"خطا: {str(ve)}. ممکنه پست/ریل خصوصی باشه یا وجود نداشته باشه.")
     except Exception as e:
         logger.error(f"Error in download/send: {str(e)}")
         context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود: {str(e)}. لطفاً دوباره تلاش کنید.")
@@ -268,14 +271,14 @@ def check_instagram_dms(context):
                                 sender_info = ig_client.user_info(sender_id)
                                 db.update_instagram_username(telegram_id, sender_info.username)
 
-                        elif message.item_type in ["media_share", "clip"]:
+                        elif message.item_type in ["media_share", "clip"]:  # clip برای ریل‌هاست
                             sender_info = ig_client.user_info(sender_id)
                             telegram_id = db.get_telegram_id_by_instagram_username(sender_info.username)
                             if telegram_id:
                                 media_id = message.media_share.id if message.item_type == 'media_share' else message.clip.id
                                 if media_id and media_id != "0":
                                     threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
-                                    ig_client.direct_send("پست/کلیپ شما در حال پردازش است.", user_ids=[sender_id])
+                                    ig_client.direct_send("پست/ریل شما در حال پردازش است.", user_ids=[sender_id])
 
                         elif message.item_type == "story_share" and message.story_share:
                             sender_info = ig_client.user_info(sender_id)
@@ -288,7 +291,7 @@ def check_instagram_dms(context):
 
         except Exception as e:
             logger.error(f"Error checking DMs: {str(e)}")
-        time.sleep(30)
+        time.sleep(60)  # فاصله بیشتر برای کاهش فشار روی API
 
 # دریافت لینک مستقیم
 def handle_link(update: Update, context):
@@ -304,14 +307,14 @@ def handle_link(update: Update, context):
             telegram_id = update.effective_user.id
             if media_id and media_id != "0":
                 threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
-                update.message.reply_text("پست شما در حال پردازش است.")
+                update.message.reply_text("پست/ریل شما در حال پردازش است.")
             else:
                 update.message.reply_text("لینک نامعتبر است.")
         except Exception as e:
             logger.error(f"Error processing link: {str(e)}")
             update.message.reply_text(f"خطا در پردازش لینک: {str(e)}")
     else:
-        update.message.reply_text("لطفاً لینک معتبر اینستاگرام بفرستید.")
+        update.message.reply_text("لطفاً لینک معتبر اینستاگرام (پست یا ریل) بفرستید.")
 
 # پنل ادمین
 def admin(update: Update, context):
