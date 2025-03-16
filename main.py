@@ -8,7 +8,6 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 import instaloader
 from instagrapi import Client
 from instagrapi.exceptions import TwoFactorRequired, ClientError
-import database as db
 from api import start_api_server
 
 # تنظیم لاگ برای دیباگ
@@ -16,20 +15,19 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # توکن ربات تلگرام
-TOKEN = os.getenv("TELEGRAM_TOKEN", "7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU")
+TOKEN = os.getenv("TELEGRAM_TOKEN", "7872003751:AAForhz28960IHKBJoZUoymEvDpU_u85JKQ")
 
 # تنظیمات ادمین
 ADMIN_ID = 6473845417
 
 # تنظیم کانال‌های اجباری
 REQUIRED_CHANNELS = [
-    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"},
-    {"chat_id": "-1002301139625", "username": "@kingwor17172"}
+    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
 ]
 
 # تنظیمات اینستاگرام
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "etehadtaskforce")
-INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "Aa123456*")
+INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "Aa123456")
 SESSION_FILE = "session.json"
 
 # راه‌اندازی دیتابیس
