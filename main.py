@@ -16,7 +16,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # توکن ربات تلگرام
-TOKEN = '7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU'
+TOKEN = '7872003751:AAForhz28960IHKBJoZUoymEvDpU_u85JKQ'
 
 # تنظیمات ادمین
 ADMIN_ID = 6473845417
