@@ -304,15 +304,20 @@ def handle_link(update: Update, context):
     if "instagram.com" in url:
         update.message.reply_text("در حال دانلود...")
         try:
-            # استخراج shortcode از لینک
+            # استخراج shortcode با در نظر گرفتن ساختارهای مختلف لینک
             parts = url.split("/")
-            if "reel" in parts or "p" in parts:
-                shortcode = parts[-2] if url.endswith('/') else parts[-1].split("?")[0]
-                logger.info(f"Extracted shortcode: {shortcode}")
-            else:
-                logger.warning(f"Invalid URL structure: {url}")
+            shortcode = None
+            for i, part in enumerate(parts):
+                if part in ("p", "reel") and i + 1 < len(parts):
+                    shortcode = parts[i + 1].split("?")[0]  # بعد از /p/ یا /reel/ و قبل از ?
+                    break
+            
+            if not shortcode:
+                logger.warning(f"Could not extract shortcode from URL: {url}")
                 update.message.reply_text("لینک باید مربوط به پست یا ریل اینستاگرام باشد.")
                 return
+            
+            logger.info(f"Extracted shortcode: {shortcode}")
 
             # تبدیل shortcode به media_id
             media_id = ig_client.media_pk_from_code(shortcode)
