@@ -299,21 +299,40 @@ def handle_link(update: Update, context):
         return
 
     url = update.message.text
+    logger.info(f"Received link from user {update.effective_user.id}: {url}")
+    
     if "instagram.com" in url:
         update.message.reply_text("در حال دانلود...")
         try:
-            shortcode = url.split("/")[-2] if url.endswith('/') else url.split("/")[-1].split("?")[0]
+            # استخراج shortcode از لینک
+            parts = url.split("/")
+            if "reel" in parts or "p" in parts:
+                shortcode = parts[-2] if url.endswith('/') else parts[-1].split("?")[0]
+                logger.info(f"Extracted shortcode: {shortcode}")
+            else:
+                logger.warning(f"Invalid URL structure: {url}")
+                update.message.reply_text("لینک باید مربوط به پست یا ریل اینستاگرام باشد.")
+                return
+
+            # تبدیل shortcode به media_id
             media_id = ig_client.media_pk_from_code(shortcode)
+            logger.info(f"Converted to media_id: {media_id}")
+            
             telegram_id = update.effective_user.id
             if media_id and media_id != "0":
                 threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
                 update.message.reply_text("پست/ریل شما در حال پردازش است.")
             else:
-                update.message.reply_text("لینک نامعتبر است.")
+                logger.warning(f"Invalid media_id: {media_id}")
+                update.message.reply_text("لینک نامعتبر است یا رسانه پیدا نشد.")
+        except ClientError as e:
+            logger.error(f"Instagrapi error processing link {url}: {str(e)}")
+            update.message.reply_text(f"خطا در پردازش لینک: {str(e)}. ممکنه پست/ریل خصوصی یا حذف‌شده باشه.")
         except Exception as e:
-            logger.error(f"Error processing link: {str(e)}")
-            update.message.reply_text(f"خطا در پردازش لینک: {str(e)}")
+            logger.error(f"Unexpected error processing link {url}: {str(e)}")
+            update.message.reply_text(f"خطا در پردازش لینک: {str(e)}. لطفاً دوباره تلاش کنید.")
     else:
+        logger.warning(f"Non-Instagram URL received: {url}")
         update.message.reply_text("لطفاً لینک معتبر اینستاگرام (پست یا ریل) بفرستید.")
 
 # پنل ادمین
