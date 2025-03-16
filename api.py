@@ -1,12 +1,13 @@
-from flask import Flask, jsonify
+from flask import Flask
+import logging
 
-api_app = Flask(__name__)
+app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
-@api_app.route('/api/status')
-def status():
-    return jsonify({'status': 'online'})
+@app.route('/')
+def ping():
+    return "API is alive!", 200
 
 def start_api_server():
-    # این تابع در صورت نیاز به API جداگانه استفاده می‌شود
-    # در حالت فعلی نیازی به اجرای آن نیست
-    pass
+    logger.info("Starting API server...")
+    app.run(host='0.0.0.0', port=5000)
