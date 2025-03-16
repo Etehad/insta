@@ -8,16 +8,18 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 import instaloader
 from instagrapi import Client
 from instagrapi.exceptions import TwoFactorRequired, ClientError
+import database as db
 from api import start_api_server
 
 # تنظیم لاگ برای دیباگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# توکن ربات تلگرام
+# توکن ربات تلگرام و تنظیمات اینستاگرام از متغیرهای محیطی
 TOKEN = os.getenv("TELEGRAM_TOKEN", "7872003751:AAForhz28960IHKBJoZUoymEvDpU_u85JKQ")
-
-# تنظیمات ادمین
+INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "etehadtaskforce")
+INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "Aa123456")
+SESSION_FILE = "session.json"
 ADMIN_ID = 6473845417
 
 # تنظیم کانال‌های اجباری
@@ -25,39 +27,35 @@ REQUIRED_CHANNELS = [
     {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
 ]
 
-# تنظیمات اینستاگرام
-INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "etehadtaskforce")
-INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "Aa123456")
-SESSION_FILE = "session.json"
-
 # راه‌اندازی دیتابیس
 db.initialize_db()
 
-# ورود به اینستاگرام با instagrapi
+# ورود به اینستاگرام با instagrapi و instaloader
 ig_client = Client()
+L = instaloader.Instaloader(max_connection_attempts=3)
 
 def login_with_session(updater=None):
+    global ig_client, L
     try:
         if os.path.exists(SESSION_FILE):
             logger.info(f"Loading session from {SESSION_FILE}")
             ig_client.load_settings(SESSION_FILE)
             ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            logger.info(f"Logged into Instagram ({INSTAGRAM_USERNAME}) with session")
+            L.load_session_from_file(INSTAGRAM_USERNAME, SESSION_FILE)
         else:
             logger.info(f"Logging into Instagram as {INSTAGRAM_USERNAME}")
             ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
             ig_client.dump_settings(SESSION_FILE)
-            logger.info(f"Session saved to {SESSION_FILE}")
+            L.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            L.save_session_to_file(SESSION_FILE)
+        logger.info(f"Logged into Instagram ({INSTAGRAM_USERNAME})")
     except TwoFactorRequired:
         logger.error("Two-factor authentication required!")
         if updater:
             updater.bot.send_message(ADMIN_ID, "احراز هویت دو مرحله‌ای نیازه! لطفاً کد 2FA رو بفرستید.")
         raise Exception("2FA required - manual intervention needed")
-    except ClientError as e:
-        logger.error(f"Instagram login error: {str(e)}")
-        raise
     except Exception as e:
-        logger.error(f"Unexpected login error: {str(e)}")
+        logger.error(f"Instagram login failed: {str(e)}")
         raise
 
 # تابع خوش‌آمدگویی
@@ -155,11 +153,13 @@ def check_membership(update: Update, context) -> bool:
 # دانلود و ارسال پست
 def process_and_send_post(media_id, telegram_id, context):
     try:
+        if not media_id or media_id == "0":
+            raise ValueError("Invalid media_id")
+
         logger.info(f"Starting download for telegram_id: {telegram_id}, media_id: {media_id}")
         if not os.path.exists("downloads"):
             os.makedirs("downloads")
 
-        L = instaloader.Instaloader(max_connection_attempts=3)
         media_info = ig_client.media_info(media_id)
         shortcode = media_info.code
         post = instaloader.Post.from_shortcode(L.context, shortcode)
@@ -215,6 +215,9 @@ def process_and_send_post(media_id, telegram_id, context):
 # دانلود و ارسال استوری
 def process_and_send_story(story_id, telegram_id, context):
     try:
+        if not story_id or story_id == "0":
+            raise ValueError("Invalid story_id")
+
         media = ig_client.story_info(story_id)
         if media:
             video_url = getattr(media, 'video_url', None)
@@ -256,19 +259,22 @@ def check_instagram_dms(context):
                             telegram_id = db.get_telegram_id_by_instagram_username(sender_info.username)
                             if telegram_id:
                                 media_id = message.media_share.id if message.item_type == 'media_share' else message.clip.id
-                                threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
-                                ig_client.direct_send("پست/کلیپ شما در حال پردازش است.", user_ids=[sender_id])
+                                if media_id and media_id != "0":
+                                    threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
+                                    ig_client.direct_send("پست/کلیپ شما در حال پردازش است.", user_ids=[sender_id])
 
                         elif message.item_type == "story_share":
                             sender_info = ig_client.user_info(sender_id)
                             telegram_id = db.get_telegram_id_by_instagram_username(sender_info.username)
-                            if telegram_id:
-                                threading.Thread(target=process_and_send_story, args=(message.story_share.id, telegram_id, context)).start()
-                                ig_client.direct_send("استوری شما در حال پردازش است.", user_ids=[sender_id])
+                            if telegram_id and message.story_share:
+                                story_id = message.story_share.id
+                                if story_id and story_id != "0":
+                                    threading.Thread(target=process_and_send_story, args=(story_id, telegram_id, context)).start()
+                                    ig_client.direct_send("استوری شما در حال پردازش است.", user_ids=[sender_id])
 
         except Exception as e:
             logger.error(f"Error checking DMs: {str(e)}")
-        time.sleep(30)
+        time.sleep(10)
 
 # دریافت لینک مستقیم
 def handle_link(update: Update, context):
@@ -282,8 +288,11 @@ def handle_link(update: Update, context):
             shortcode = url.split("/")[-2] if url.endswith('/') else url.split("/")[-1].split("?")[0]
             media_id = ig_client.media_pk_from_code(shortcode)
             telegram_id = update.effective_user.id
-            threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
-            update.message.reply_text("پست شما در حال پردازش است.")
+            if media_id and media_id != "0":
+                threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
+                update.message.reply_text("پست شما در حال پردازش است.")
+            else:
+                update.message.reply_text("لینک نامعتبر است.")
         except Exception as e:
             logger.error(f"Error processing link: {str(e)}")
             update.message.reply_text(f"خطا در پردازش لینک: {str(e)}")
@@ -369,14 +378,9 @@ def main():
     instagram_thread = threading.Thread(target=check_instagram_dms, args=(dispatcher,), daemon=True)
     instagram_thread.start()
 
-    # حلقه پایداری
-    while True:
-        try:
-            updater.start_polling()
-            updater.idle()
-        except Exception as e:
-            logger.error(f"Bot crashed: {str(e)}")
-            time.sleep(5)
+    # شروع ربات
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
