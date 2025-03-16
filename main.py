@@ -16,19 +16,20 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # توکن ربات تلگرام
-TOKEN = '7872003751:AAForhz28960IHKBJoZUoymEvDpU_u85JKQ'
+TOKEN = os.getenv("TELEGRAM_TOKEN", "7872003751:AAGK4IHqCqr-8nxxAfj1ImQNpRMlRHRGxxU")
 
 # تنظیمات ادمین
 ADMIN_ID = 6473845417
 
 # تنظیم کانال‌های اجباری
 REQUIRED_CHANNELS = [
-    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
+    {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"},
+    {"chat_id": "-1002301139625", "username": "@kingwor17172"}
 ]
 
 # تنظیمات اینستاگرام
-INSTAGRAM_USERNAME = "etehadtaskforce"
-INSTAGRAM_PASSWORD = "Aa123456"
+INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "etehadtaskforce")
+INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "Aa123456*")
 SESSION_FILE = "session.json"
 
 # راه‌اندازی دیتابیس
@@ -53,7 +54,6 @@ def login_with_session(updater=None):
         logger.error("Two-factor authentication required!")
         if updater:
             updater.bot.send_message(ADMIN_ID, "احراز هویت دو مرحله‌ای نیازه! لطفاً کد 2FA رو بفرستید.")
-            # اینجا باید یه سیستم برای دریافت کد از ادمین بذارید (در ادامه توضیح می‌دم)
         raise Exception("2FA required - manual intervention needed")
     except ClientError as e:
         logger.error(f"Instagram login error: {str(e)}")
