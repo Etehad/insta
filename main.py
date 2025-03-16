@@ -291,7 +291,7 @@ def check_instagram_dms(context):
 
         except Exception as e:
             logger.error(f"Error checking DMs: {str(e)}")
-        time.sleep(60)  # فاصله بیشتر برای کاهش فشار روی API
+        time.sleep(10)  # فاصله بیشتر برای کاهش فشار روی API
 
 # دریافت لینک مستقیم
 def handle_link(update: Update, context):
