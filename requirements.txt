@@ -1,7 +1,6 @@
-python-telegram-bot==13.7
-instaloader==4.9.5
-instagrapi==1.17.0
-flask==2.0.1
-werkzeug==2.0.3
-gunicorn==20.1.0
+python-telegram-bot==13.15
+instagrapi
+instaloader
+flask
+sqlite3
 Pillow>=8.1.1
