@@ -87,13 +87,17 @@ def button_handler(update: Update, context):
     if query.data == "get_token":
         token = db.register_user(user_id)
         if token:
-            query.edit_message_text(f"توکن شما: `{token}`\nاین رو به دایرکت [etehad141](https://instagram.com/etehad141) بفرستید.", parse_mode="Markdown")
+            query.edit_message_text(f"توکن شما: `{token}`\nاین رو به دایرکت 'etehad141' بفرستید.", parse_mode="Markdown")
         else:
             query.edit_message_text("خطا در تولید توکن!")
     elif query.data == "instagram_help":
         query.edit_message_text("راهنما: توکن رو به 'etehad141' دایرکت کنید.")
     elif query.data == "manual_link":
         query.edit_message_text("لینک پست یا ریل رو بفرستید (مثلاً: https://www.instagram.com/reel/xyz/)")
+    elif query.data.startswith("download_stories_"):
+        username = query.data.split("download_stories_")[1]
+        chat_id = query.message.chat_id
+        threading.Thread(target=download_instagram_stories, args=(username, chat_id, context)).start()
 
 def check_membership(update: Update, context):
     user_id = update.effective_user.id
@@ -146,15 +150,47 @@ def process_instagram_profile(username, chat_id, context):
         logger.info(f"Processing Instagram profile for username: {username}, chat_id: {chat_id}")
         # گرفتن اطلاعات کاربر
         user_info = ig_client.user_info_by_username(username)
-        profile_pic_url = str(user_info.profile_pic_url_hd)  # تبدیل به رشته
+        profile_pic_url = str(user_info.profile_pic_url_hd)
+        full_name = user_info.full_name or username
+        followers = user_info.follower_count
+        following = user_info.following_count
+        posts = user_info.media_count
+        is_private = "خصوصی" if user_info.is_private else "عمومی"
         
-        # ارسال عکس پروفایل
-        profile_caption = f"عکس پروفایل [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
-        context.bot.send_photo(chat_id=chat_id, photo=profile_pic_url, caption=profile_caption, parse_mode="Markdown")
-        
-        # گرفتن استوری‌ها
+        # گرفتن تعداد استوری‌ها
         user_id = user_info.pk
         stories = ig_client.user_stories(user_id)
+        story_count = len(stories)
+        
+        # کپشن پروفایل
+        profile_caption = (
+            f"*نام پیج:* {full_name}\n"
+            f"*آیدی:* [{username}](https://www.instagram.com/{username}/)\n"
+            f"*فالوئرها:* {followers}\n"
+            f"*فالوئینگ‌ها:* {following}\n"
+            f"*تعداد پست‌ها:* {posts}\n"
+            f"*وضعیت پیج:* {is_private}\n"
+            f"*تعداد استوری‌ها:* {story_count}\n"
+            "[TaskForce](https://t.me/task_1_4_1_force)"
+        )
+        
+        # دکمه دانلود استوری‌ها
+        keyboard = [[InlineKeyboardButton("دانلود استوری‌ها", callback_data=f"download_stories_{username}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # ارسال عکس پروفایل با اطلاعات
+        context.bot.send_photo(chat_id=chat_id, photo=profile_pic_url, caption=profile_caption, parse_mode="Markdown", reply_markup=reply_markup)
+    except Exception as e:
+        logger.error(f"Error processing Instagram profile: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در پردازش پروفایل: {str(e)}")
+
+def download_instagram_stories(username, chat_id, context):
+    try:
+        logger.info(f"Downloading stories for username: {username}, chat_id: {chat_id}")
+        user_info = ig_client.user_info_by_username(username)
+        user_id = user_info.pk
+        stories = ig_client.user_stories(user_id)
+        
         if not stories:
             context.bot.send_message(chat_id=chat_id, text=f"استوری فعالی برای @{username} پیدا نشد!")
             return
@@ -162,18 +198,18 @@ def process_instagram_profile(username, chat_id, context):
         # ارسال استوری‌ها به ترتیب
         for story in stories:
             if story.media_type == 1:  # عکس
-                story_url = str(story.thumbnail_url)  # تبدیل به رشته
+                story_url = str(story.thumbnail_url)
                 story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
                 context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
             elif story.media_type == 2:  # ویدیو
-                story_url = str(story.video_url)  # تبدیل به رشته
+                story_url = str(story.video_url)
                 story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
                 context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
         
         context.bot.send_message(chat_id=chat_id, text=f"استوری‌های @{username} با موفقیت ارسال شدند!")
     except Exception as e:
-        logger.error(f"Error processing Instagram profile: {str(e)}")
-        context.bot.send_message(chat_id=chat_id, text=f"خطا در پردازش پروفایل: {str(e)}")
+        logger.error(f"Error downloading Instagram stories: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود استوری‌ها: {str(e)}")
 
 def check_instagram_dms(context):
     while True:
