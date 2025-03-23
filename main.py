@@ -111,9 +111,9 @@ def check_membership(update: Update, context):
     update.message.reply_text("لطفاً در کانال‌ها عضو شوید:", reply_markup=InlineKeyboardMarkup(keyboard))
     return False
 
-def process_instagram_media(media_id, telegram_id, context):
+def process_instagram_media(media_id, chat_id, context):
     try:
-        logger.info(f"Processing Instagram media for telegram_id: {telegram_id}, media_id: {media_id}")
+        logger.info(f"Processing Instagram media for chat_id: {chat_id}, media_id: {media_id}")
         media_info = ig_client.media_info(media_id)
         if media_info.media_type == 2:  # ویدیو یا ریل
             video_url = str(media_info.video_url)
@@ -127,14 +127,14 @@ def process_instagram_media(media_id, telegram_id, context):
             cover_caption = f"{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
             if music_name:
                 cover_caption += f"\nآهنگ: {music_name}"
-            context.bot.send_video(chat_id=telegram_id, video=video_url, caption=video_caption, parse_mode="Markdown")
-            context.bot.send_photo(chat_id=telegram_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
-            context.bot.send_message(chat_id=telegram_id, text="ریل با موفقیت ارسال شد!")
+            context.bot.send_video(chat_id=chat_id, video=video_url, caption=video_caption, parse_mode="Markdown")
+            context.bot.send_photo(chat_id=chat_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
+            context.bot.send_message(chat_id=chat_id, text="ریل با موفقیت ارسال شد!")
         else:
-            context.bot.send_message(chat_id=telegram_id, text="فقط ریل‌ها پشتیبانی می‌شن!")
+            context.bot.send_message(chat_id=chat_id, text="فقط ریل‌ها پشتیبانی می‌شن!")
     except Exception as e:
         logger.error(f"Error processing Instagram media: {str(e)}")
-        context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود: {str(e)}")
 
 def check_instagram_dms(context):
     while True:
@@ -172,7 +172,7 @@ def handle_link(update: Update, context):
             return
         update.message.reply_text("لطفاً لینک اینستاگرام بفرستید!")
         return
-    logger.info(f"Received Instagram link from user {update.effective_user.id}: {url}")
+    logger.info(f"Received Instagram link from user {update.effective_user.id} in chat {update.message.chat_id}: {url}")
     update.message.reply_text("در حال دانلود...")
     try:
         parts = url.split("/")
@@ -186,7 +186,8 @@ def handle_link(update: Update, context):
             return
         media_id = ig_client.media_pk_from_code(shortcode)
         if media_id and media_id != "0":
-            threading.Thread(target=process_instagram_media, args=(media_id, update.effective_user.id, context)).start()
+            # استفاده از chat_id به جای user_id برای ارسال در همان چت
+            threading.Thread(target=process_instagram_media, args=(media_id, update.message.chat_id, context)).start()
         else:
             update.message.reply_text("رسانه پیدا نشد!")
     except Exception as e:
