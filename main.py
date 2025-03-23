@@ -91,9 +91,9 @@ def button_handler(update: Update, context):
         else:
             query.edit_message_text("خطا در تولید توکن!")
     elif query.data == "instagram_help":
-        query.edit_message_text("راهنما: توکن رو به [etehad141](https://instagram.com/etehad141) دایرکت کنید.")
+        query.edit_message_text("راهنما: توکن رو به 'etehad141' دایرکت کنید.")
     elif query.data == "manual_link":
-        query.edit_message_text("لینک پست یا ریل رو بفرستید (مثلاً: https://www.instagram.com/reel/DHTLO0LOYoG/?utm_source=ig_web_copy_link&igsh=MzRlODBiNWFlZA==)")
+        query.edit_message_text("لینک پست یا ریل رو بفرستید (مثلاً: https://www.instagram.com/reel/xyz/)")
 
 def check_membership(update: Update, context):
     user_id = update.effective_user.id
@@ -119,13 +119,12 @@ def process_instagram_media(media_id, chat_id, context):
             video_url = str(media_info.video_url)
             thumbnail_url = str(media_info.thumbnail_url)
             caption = media_info.caption_text or "بدون کپشن"
-            page_id = media_info.user.username  # گرفتن آیدی پیج
+            page_id = media_info.user.username
             music_name = None
             if hasattr(media_info, 'clips_metadata') and media_info.clips_metadata:
                 if 'music_info' in media_info.clips_metadata and media_info.clips_metadata['music_info']:
                     music_name = media_info.clips_metadata['music_info'].get('title', None)
             video_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
-            # کپشن کاور با توضیح و آیدی پیج
             cover_caption = (
                 f"*کپشن پست:*\n{caption}\n"
                 f"آیدی پیج: [{page_id}](https://www.instagram.com/{page_id}/)\n"
@@ -135,11 +134,46 @@ def process_instagram_media(media_id, chat_id, context):
                 cover_caption += f"\nآهنگ: {music_name}"
             context.bot.send_video(chat_id=chat_id, video=video_url, caption=video_caption, parse_mode="Markdown")
             context.bot.send_photo(chat_id=chat_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
+            context.bot.send_message(chat_id=chat_id, text="پست با موفقیت ارسال شد!")
         else:
             context.bot.send_message(chat_id=chat_id, text="فقط پست ها پشتیبانی می‌شن!")
     except Exception as e:
         logger.error(f"Error processing Instagram media: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود: {str(e)}")
+
+def process_instagram_profile(username, chat_id, context):
+    try:
+        logger.info(f"Processing Instagram profile for username: {username}, chat_id: {chat_id}")
+        # گرفتن اطلاعات کاربر
+        user_info = ig_client.user_info_by_username(username)
+        profile_pic_url = user_info.profile_pic_url_hd  # عکس پروفایل اچ‌دی
+        
+        # ارسال عکس پروفایل
+        profile_caption = f"عکس پروفایل [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
+        context.bot.send_photo(chat_id=chat_id, photo=profile_pic_url, caption=profile_caption, parse_mode="Markdown")
+        
+        # گرفتن استوری‌ها
+        user_id = user_info.pk
+        stories = ig_client.user_stories(user_id)
+        if not stories:
+            context.bot.send_message(chat_id=chat_id, text=f"استوری فعالی برای @{username} پیدا نشد!")
+            return
+        
+        # ارسال استوری‌ها به ترتیب
+        for story in stories:
+            if story.media_type == 1:  # عکس
+                story_url = story.thumbnail_url
+                story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
+                context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
+            elif story.media_type == 2:  # ویدیو
+                story_url = story.video_url
+                story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
+                context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
+        
+        context.bot.send_message(chat_id=chat_id, text=f"استوری‌های @{username} با موفقیت ارسال شدند!")
+    except Exception as e:
+        logger.error(f"Error processing Instagram profile: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در پردازش پروفایل: {str(e)}")
 
 def check_instagram_dms(context):
     while True:
@@ -165,22 +199,34 @@ def check_instagram_dms(context):
                                 threading.Thread(target=process_instagram_media, args=(media_id, telegram_id, context)).start()
         except Exception as e:
             logger.error(f"Error checking Instagram DMs: {str(e)}")
-            time.sleep(60)  # در صورت خطا، دوباره تلاش می‌کنه
+            time.sleep(60)
         time.sleep(30)
 
 def handle_link(update: Update, context):
     if not check_membership(update, context):
         return
-    url = update.message.text
-    if "instagram.com" not in url:
-        if update.message.chat.type != "private":  # در گروه فقط لینک اینستا پردازش بشه
-            return
-        update.message.reply_text("لطفاً لینک اینستاگرام بفرستید!")
+    text = update.message.text
+    chat_id = update.message.chat_id
+    
+    # بررسی اگر آیدی اینستاگرام با فرمت @username باشه
+    if text.startswith('@') and "instagram.com" not in text:
+        username = text[1:]  # حذف @ از ابتدا
+        logger.info(f"Received Instagram username from user {update.effective_user.id} in chat {chat_id}: {username}")
+        update.message.reply_text(f"در حال پردازش پروفایل @{username}...")
+        threading.Thread(target=process_instagram_profile, args=(username, chat_id, context)).start()
         return
-    logger.info(f"Received Instagram link from user {update.effective_user.id} in chat {update.message.chat_id}: {url}")
+    
+    # بررسی اگر لینک اینستاگرام باشه
+    if "instagram.com" not in text:
+        if update.message.chat.type != "private":
+            return
+        update.message.reply_text("لطفاً لینک اینستاگرام یا آیدی با فرمت @username بفرستید!")
+        return
+    
+    logger.info(f"Received Instagram link from user {update.effective_user.id} in chat {chat_id}: {text}")
     update.message.reply_text("در حال دانلود...")
     try:
-        parts = url.split("/")
+        parts = text.split("/")
         shortcode = None
         for i, part in enumerate(parts):
             if part in ("p", "reel") and i + 1 < len(parts):
@@ -191,7 +237,7 @@ def handle_link(update: Update, context):
             return
         media_id = ig_client.media_pk_from_code(shortcode)
         if media_id and media_id != "0":
-            threading.Thread(target=process_instagram_media, args=(media_id, update.message.chat_id, context)).start()
+            threading.Thread(target=process_instagram_media, args=(media_id, chat_id, context)).start()
         else:
             update.message.reply_text("رسانه پیدا نشد!")
     except Exception as e:
