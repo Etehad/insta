@@ -6,11 +6,20 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from instagrapi import Client
 from instagrapi.exceptions import TwoFactorRequired, ClientError
+import instaloader
 import database as db
 from api import start_api_server
 from flask import Flask
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# تنظیم لاگ با جزئیات بیشتر
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 TOKEN = "7872003751:AAForhz28960IHKBJoZUoymEvDpU_u85JKQ"
@@ -24,48 +33,35 @@ REQUIRED_CHANNELS = [
 ]
 
 ig_client = Client()
-# ig_client.set_proxy("http://103.174.102.223:8080")  # بدون پراکسی
+loader = instaloader.Instaloader()
 
-# Flask app برای Keep Alive
 app = Flask(__name__)
 
 @app.route('/')
 def keep_alive():
     return "Bot is alive!"
 
-def login_with_session(updater=None):
+def login_instagram():
     global ig_client
-    while True:
-        try:
-            if os.path.exists(SESSION_FILE):
-                logger.info(f"Loading session from {SESSION_FILE}")
-                ig_client.load_settings(SESSION_FILE)
-                ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            else:
-                logger.info(f"Logging into Instagram as {INSTAGRAM_USERNAME}")
-                ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-                ig_client.dump_settings(SESSION_FILE)
-            logger.info(f"Logged into Instagram ({INSTAGRAM_USERNAME})")
-            break
-        except TwoFactorRequired:
-            logger.error("Two-factor authentication required!")
-            if updater:
-                updater.bot.send_message(ADMIN_ID, "احراز هویت دو مرحله‌ای نیازه!")
-            time.sleep(300)
-        except ClientError as e:
-            logger.error(f"Instagram login failed: {str(e)}")
-            if updater:
-                updater.bot.send_message(ADMIN_ID, f"خطا در لاگین: {str(e)}")
-            time.sleep(300)
-            if os.path.exists(SESSION_FILE):
-                os.remove(SESSION_FILE)
-        except Exception as e:
-            logger.error(f"Unexpected error during login: {str(e)}")
-            if updater:
-                updater.bot.send_message(ADMIN_ID, f"خطای ناشناخته: {str(e)}. ممکنه پراکسی یا اتصال مشکل داشته باشه.")
-            time.sleep(300)
-            if os.path.exists(SESSION_FILE):
-                os.remove(SESSION_FILE)
+    try:
+        if os.path.exists(SESSION_FILE):
+            logger.info(f"Loading Instagram session from {SESSION_FILE}")
+            ig_client.load_settings(SESSION_FILE)
+            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+        else:
+            logger.info(f"Logging into Instagram as {INSTAGRAM_USERNAME}")
+            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            ig_client.dump_settings(SESSION_FILE)
+        logger.info(f"Successfully logged into Instagram ({INSTAGRAM_USERNAME})")
+    except TwoFactorRequired:
+        logger.error("Two-factor authentication required!")
+        raise
+    except ClientError as e:
+        logger.error(f"Instagram login failed: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during Instagram login: {str(e)}")
+        raise
 
 def start(update: Update, context):
     logger.info(f"User {update.effective_user.id} started the bot")
@@ -99,10 +95,7 @@ def button_handler(update: Update, context):
     elif query.data == "instagram_help":
         query.edit_message_text("راهنما: توکن رو به 'etehad141' دایرکت کنید.")
     elif query.data == "manual_link":
-        try:
-            query.edit_message_text("لینک پست یا ریل رو بفرستید (مثلاً: https://www.instagram.com/reel/xyz/)")
-        except Exception as e:
-            logger.info(f"Ignoring repeat button press: {str(e)}")
+        query.edit_message_text("لینک پست یا ریل رو بفرستید (مثلاً: https://www.instagram.com/reel/xyz/)")
 
 def check_membership(update: Update, context):
     user_id = update.effective_user.id
@@ -120,52 +113,49 @@ def check_membership(update: Update, context):
     update.message.reply_text("لطفاً در کانال‌ها عضو شوید:", reply_markup=InlineKeyboardMarkup(keyboard))
     return False
 
-def process_and_send_post(media_id, telegram_id, context):
+def process_instagram_media(media_id, telegram_id, context):
     try:
-        logger.info(f"Downloading for telegram_id: {telegram_id}, media_id: {media_id}")
+        logger.info(f"Processing Instagram media for telegram_id: {telegram_id}, media_id: {media_id}")
         media_info = ig_client.media_info(media_id)
         if media_info.media_type == 2:  # ویدیو یا ریل
             video_url = str(media_info.video_url)
             thumbnail_url = str(media_info.thumbnail_url)
             caption = media_info.caption_text or "بدون کپشن"
             music_name = None
-
-            # چک کردن نام آهنگ
             if hasattr(media_info, 'clips_metadata') and media_info.clips_metadata:
                 if 'music_info' in media_info.clips_metadata and media_info.clips_metadata['music_info']:
                     music_name = media_info.clips_metadata['music_info'].get('title', None)
-
-            # کپشن ویدیو
             video_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
-
-            # کپشن کاور
             cover_caption = f"{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
             if music_name:
                 cover_caption += f"\nآهنگ: {music_name}"
-
-            if video_url:
-                # ارسال ویدیو
-                context.bot.send_video(
-                    chat_id=telegram_id,
-                    video=video_url,
-                    caption=video_caption,
-                    parse_mode="Markdown"
-                )
-                # ارسال کاور
-                context.bot.send_photo(
-                    chat_id=telegram_id,
-                    photo=thumbnail_url,
-                    caption=cover_caption,
-                    parse_mode="Markdown"
-                )
-                context.bot.send_message(chat_id=telegram_id, text="ریل با موفقیت ارسال شد!")
-            else:
-                context.bot.send_message(chat_id=telegram_id, text="ویدیو پیدا نشد!")
+            context.bot.send_video(chat_id=telegram_id, video=video_url, caption=video_caption, parse_mode="Markdown")
+            context.bot.send_photo(chat_id=telegram_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
+            context.bot.send_message(chat_id=telegram_id, text="ریل با موفقیت ارسال شد!")
         else:
             context.bot.send_message(chat_id=telegram_id, text="فقط ریل‌ها پشتیبانی می‌شن!")
     except Exception as e:
-        logger.error(f"Error in download: {str(e)}")
-        context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود: {str(e)}. ممکنه پراکسی یا اتصال مشکل داشته باشه.")
+        logger.error(f"Error processing Instagram media: {str(e)}")
+        context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود: {str(e)}")
+
+def download_public_instagram(url, telegram_id, context):
+    try:
+        logger.info(f"Attempting public download for URL: {url}")
+        shortcode = url.split("/")[-2]
+        post = instaloader.Post.from_shortcode(loader.context, shortcode)
+        if post.is_video:
+            loader.download_post(post, target=f"temp_{telegram_id}")
+            video_file = f"temp_{telegram_id}/{post.shortcode}.mp4"
+            with open(video_file, 'rb') as f:
+                context.bot.send_video(chat_id=telegram_id, video=f, caption="[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown")
+            context.bot.send_message(chat_id=telegram_id, text="ریل عمومی با موفقیت دانلود شد!")
+            os.remove(video_file)
+            os.rmdir(f"temp_{telegram_id}")
+        else:
+            context.bot.send_message(chat_id=telegram_id, text="فقط ریل‌ها پشتیبانی می‌شن!")
+    except Exception as e:
+        logger.error(f"Error downloading public Instagram content: {str(e)}")
+        context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود عمومی: {str(e)}")
 
 def check_instagram_dms(context):
     while True:
@@ -188,39 +178,38 @@ def check_instagram_dms(context):
                             telegram_id = db.get_telegram_id_by_instagram_username(sender_info.username)
                             if telegram_id:
                                 media_id = message.media_share.id if message.item_type == 'media_share' else message.clip.id
-                                threading.Thread(target=process_and_send_post, args=(media_id, telegram_id, context)).start()
+                                threading.Thread(target=process_instagram_media, args=(media_id, telegram_id, context)).start()
         except Exception as e:
-            logger.error(f"Error checking DMs: {str(e)}")
-            login_with_session(context)
+            logger.error(f"Error checking Instagram DMs: {str(e)}")
+            time.sleep(60)  # در صورت خطا، دوباره تلاش می‌کنه
         time.sleep(30)
 
 def handle_link(update: Update, context):
     if not check_membership(update, context):
         return
     url = update.message.text
-    logger.info(f"Received link from user {update.effective_user.id}: {url}")
-    if "instagram.com" in url:
-        update.message.reply_text("در حال دانلود...")
-        try:
-            parts = url.split("/")
-            shortcode = None
-            for i, part in enumerate(parts):
-                if part in ("p", "reel") and i + 1 < len(parts):
-                    shortcode = parts[i + 1].split("?")[0]
-                    break
-            if not shortcode:
-                update.message.reply_text("لینک نامعتبر!")
-                return
-            media_id = ig_client.media_pk_from_code(shortcode)
-            if media_id and media_id != "0":
-                threading.Thread(target=process_and_send_post, args=(media_id, update.effective_user.id, context)).start()
-                update.message.reply_text("در حال پردازش...")
-            else:
-                update.message.reply_text("رسانه پیدا نشد!")
-        except Exception as e:
-            update.message.reply_text(f"خطا: {str(e)}")
-    else:
+    if "instagram.com" not in url:
+        if update.message.chat.type != "private":  # در گروه فقط لینک اینستا پردازش بشه
+            return
         update.message.reply_text("لطفاً لینک اینستاگرام بفرستید!")
+        return
+    logger.info(f"Received Instagram link from user {update.effective_user.id}: {url}")
+    update.message.reply_text("در حال دانلود...")
+    try:
+        parts = url.split("/")
+        shortcode = None
+        for i, part in enumerate(parts):
+            if part in ("p", "reel") and i + 1 < len(parts):
+                shortcode = parts[i + 1].split("?")[0]
+                break
+        if not shortcode:
+            update.message.reply_text("لینک نامعتبر!")
+            return
+        # ابتدا تلاش برای دانلود عمومی بدون لاگین
+        threading.Thread(target=download_public_instagram, args=(url, update.effective_user.id, context)).start()
+    except Exception as e:
+        logger.error(f"Error handling link: {str(e)}")
+        update.message.reply_text(f"خطا: {str(e)}")
 
 def main():
     logger.info("Starting bot...")
@@ -233,10 +222,15 @@ def main():
     api_thread = threading.Thread(target=start_api_server, daemon=True)
     api_thread.start()
 
-    updater = Updater(TOKEN, use_context=True)
-    login_thread = threading.Thread(target=login_with_session, args=(updater,), daemon=True)
-    login_thread.start()
+    # لاگین اینستاگرام فقط یک بار
+    try:
+        login_instagram()
+    except Exception as e:
+        logger.critical(f"Failed to login to Instagram: {str(e)}")
+        updater.bot.send_message(ADMIN_ID, f"خطا در لاگین اینستاگرام: {str(e)}")
+        return
 
+    updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
