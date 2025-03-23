@@ -6,7 +6,6 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from instagrapi import Client
 from instagrapi.exceptions import TwoFactorRequired, ClientError
-import instaloader
 import database as db
 from api import start_api_server
 from flask import Flask
@@ -33,7 +32,6 @@ REQUIRED_CHANNELS = [
 ]
 
 ig_client = Client()
-loader = instaloader.Instaloader()
 
 app = Flask(__name__)
 
@@ -138,25 +136,6 @@ def process_instagram_media(media_id, telegram_id, context):
         logger.error(f"Error processing Instagram media: {str(e)}")
         context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود: {str(e)}")
 
-def download_public_instagram(url, telegram_id, context):
-    try:
-        logger.info(f"Attempting public download for URL: {url}")
-        shortcode = url.split("/")[-2]
-        post = instaloader.Post.from_shortcode(loader.context, shortcode)
-        if post.is_video:
-            loader.download_post(post, target=f"temp_{telegram_id}")
-            video_file = f"temp_{telegram_id}/{post.shortcode}.mp4"
-            with open(video_file, 'rb') as f:
-                context.bot.send_video(chat_id=telegram_id, video=f, caption="[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown")
-            context.bot.send_message(chat_id=telegram_id, text="ریل عمومی با موفقیت دانلود شد!")
-            os.remove(video_file)
-            os.rmdir(f"temp_{telegram_id}")
-        else:
-            context.bot.send_message(chat_id=telegram_id, text="فقط ریل‌ها پشتیبانی می‌شن!")
-    except Exception as e:
-        logger.error(f"Error downloading public Instagram content: {str(e)}")
-        context.bot.send_message(chat_id=telegram_id, text=f"خطا در دانلود عمومی: {str(e)}")
-
 def check_instagram_dms(context):
     while True:
         try:
@@ -205,8 +184,11 @@ def handle_link(update: Update, context):
         if not shortcode:
             update.message.reply_text("لینک نامعتبر!")
             return
-        # ابتدا تلاش برای دانلود عمومی بدون لاگین
-        threading.Thread(target=download_public_instagram, args=(url, update.effective_user.id, context)).start()
+        media_id = ig_client.media_pk_from_code(shortcode)
+        if media_id and media_id != "0":
+            threading.Thread(target=process_instagram_media, args=(media_id, update.effective_user.id, context)).start()
+        else:
+            update.message.reply_text("رسانه پیدا نشد!")
     except Exception as e:
         logger.error(f"Error handling link: {str(e)}")
         update.message.reply_text(f"خطا: {str(e)}")
@@ -227,6 +209,7 @@ def main():
         login_instagram()
     except Exception as e:
         logger.critical(f"Failed to login to Instagram: {str(e)}")
+        updater = Updater(TOKEN, use_context=True)
         updater.bot.send_message(ADMIN_ID, f"خطا در لاگین اینستاگرام: {str(e)}")
         return
 
