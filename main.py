@@ -126,7 +126,7 @@ def process_instagram_media(media_id, chat_id, context):
                     music_name = media_info.clips_metadata['music_info'].get('title', None)
             video_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
             cover_caption = (
-                f"*کپشن پست:*\n{caption}\n"
+                f"*کپشن خود پست اینستاگرام:*\n{caption}\n"
                 f"آیدی پیج: [{page_id}](https://www.instagram.com/{page_id}/)\n"
                 "[TaskForce](https://t.me/task_1_4_1_force)"
             )
@@ -134,9 +134,9 @@ def process_instagram_media(media_id, chat_id, context):
                 cover_caption += f"\nآهنگ: {music_name}"
             context.bot.send_video(chat_id=chat_id, video=video_url, caption=video_caption, parse_mode="Markdown")
             context.bot.send_photo(chat_id=chat_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
-            context.bot.send_message(chat_id=chat_id, text="پست با موفقیت ارسال شد!")
+            context.bot.send_message(chat_id=chat_id, text="ریل با موفقیت ارسال شد!")
         else:
-            context.bot.send_message(chat_id=chat_id, text="فقط پست ها پشتیبانی می‌شن!")
+            context.bot.send_message(chat_id=chat_id, text="فقط ریل‌ها پشتیبانی می‌شن!")
     except Exception as e:
         logger.error(f"Error processing Instagram media: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود: {str(e)}")
@@ -146,7 +146,7 @@ def process_instagram_profile(username, chat_id, context):
         logger.info(f"Processing Instagram profile for username: {username}, chat_id: {chat_id}")
         # گرفتن اطلاعات کاربر
         user_info = ig_client.user_info_by_username(username)
-        profile_pic_url = user_info.profile_pic_url_hd  # عکس پروفایل اچ‌دی
+        profile_pic_url = str(user_info.profile_pic_url_hd)  # تبدیل به رشته
         
         # ارسال عکس پروفایل
         profile_caption = f"عکس پروفایل [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
@@ -162,11 +162,11 @@ def process_instagram_profile(username, chat_id, context):
         # ارسال استوری‌ها به ترتیب
         for story in stories:
             if story.media_type == 1:  # عکس
-                story_url = story.thumbnail_url
+                story_url = str(story.thumbnail_url)  # تبدیل به رشته
                 story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
                 context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
             elif story.media_type == 2:  # ویدیو
-                story_url = story.video_url
+                story_url = str(story.video_url)  # تبدیل به رشته
                 story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
                 context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
         
