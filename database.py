@@ -20,7 +20,7 @@ def initialize_db():
 
 def register_user(telegram_id):
     try:
-        token = str(telegram_id) + "_token"  # یه توکن ساده برای مثال
+        token = str(telegram_id) + "_token"
         conn = sqlite3.connect('database.db')
         c = conn.cursor()
         c.execute("INSERT OR REPLACE INTO users (telegram_id, token) VALUES (?, ?)", (telegram_id, token))
@@ -68,3 +68,11 @@ def mark_message_processed(message_id):
     c.execute("INSERT OR IGNORE INTO processed_messages (message_id) VALUES (?)", (message_id,))
     conn.commit()
     conn.close()
+
+def get_all_users():
+    conn = sqlite3.connect('database.db')
+    c = conn.cursor()
+    c.execute("SELECT telegram_id, token, instagram_username FROM users")
+    users = c.fetchall()
+    conn.close()
+    return users
