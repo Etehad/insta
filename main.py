@@ -87,13 +87,13 @@ def button_handler(update: Update, context):
     if query.data == "get_token":
         token = db.register_user(user_id)
         if token:
-            query.edit_message_text(f"توکن شما: `{token}`\nاین رو به دایرکت 'etehad141' بفرستید.", parse_mode="Markdown")
+            query.edit_message_text(f"توکن شما: `{token}`\nاین رو به دایرکت [etehad141](https://instagram.com/etehad141) بفرستید.", parse_mode="Markdown")
         else:
             query.edit_message_text("خطا در تولید توکن!")
     elif query.data == "instagram_help":
-        query.edit_message_text("راهنما: توکن رو به 'etehad141' دایرکت کنید.")
+        query.edit_message_text("راهنما: توکن رو به [etehad141](https://instagram.com/etehad141) دایرکت کنید.")
     elif query.data == "manual_link":
-        query.edit_message_text("لینک پست یا ریل رو بفرستید (مثلاً: https://www.instagram.com/reel/xyz/)")
+        query.edit_message_text("لینک پست یا ریل رو بفرستید (مثلاً: https://www.instagram.com/reel/DHTLO0LOYoG/?utm_source=ig_web_copy_link&igsh=MzRlODBiNWFlZA==)")
 
 def check_membership(update: Update, context):
     user_id = update.effective_user.id
@@ -127,7 +127,7 @@ def process_instagram_media(media_id, chat_id, context):
             video_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
             # کپشن کاور با توضیح و آیدی پیج
             cover_caption = (
-                f"*کپشن خود پست اینستاگرام:*\n{caption}\n"
+                f"*کپشن پست:*\n{caption}\n"
                 f"آیدی پیج: [{page_id}](https://www.instagram.com/{page_id}/)\n"
                 "[TaskForce](https://t.me/task_1_4_1_force)"
             )
@@ -135,9 +135,8 @@ def process_instagram_media(media_id, chat_id, context):
                 cover_caption += f"\nآهنگ: {music_name}"
             context.bot.send_video(chat_id=chat_id, video=video_url, caption=video_caption, parse_mode="Markdown")
             context.bot.send_photo(chat_id=chat_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
-            context.bot.send_message(chat_id=chat_id, text="ریل با موفقیت ارسال شد!")
         else:
-            context.bot.send_message(chat_id=chat_id, text="فقط ریل‌ها پشتیبانی می‌شن!")
+            context.bot.send_message(chat_id=chat_id, text="فقط پست ها پشتیبانی می‌شن!")
     except Exception as e:
         logger.error(f"Error processing Instagram media: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود: {str(e)}")
