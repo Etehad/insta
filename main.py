@@ -119,12 +119,18 @@ def process_instagram_media(media_id, chat_id, context):
             video_url = str(media_info.video_url)
             thumbnail_url = str(media_info.thumbnail_url)
             caption = media_info.caption_text or "بدون کپشن"
+            page_id = media_info.user.username  # گرفتن آیدی پیج
             music_name = None
             if hasattr(media_info, 'clips_metadata') and media_info.clips_metadata:
                 if 'music_info' in media_info.clips_metadata and media_info.clips_metadata['music_info']:
                     music_name = media_info.clips_metadata['music_info'].get('title', None)
             video_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
-            cover_caption = f"{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
+            # کپشن کاور با توضیح و آیدی پیج
+            cover_caption = (
+                f"*کپشن خود پست اینستاگرام:*\n{caption}\n"
+                f"آیدی پیج: [{page_id}](https://www.instagram.com/{page_id}/)\n"
+                "[TaskForce](https://t.me/task_1_4_1_force)"
+            )
             if music_name:
                 cover_caption += f"\nآهنگ: {music_name}"
             context.bot.send_video(chat_id=chat_id, video=video_url, caption=video_caption, parse_mode="Markdown")
@@ -186,7 +192,6 @@ def handle_link(update: Update, context):
             return
         media_id = ig_client.media_pk_from_code(shortcode)
         if media_id and media_id != "0":
-            # استفاده از chat_id به جای user_id برای ارسال در همان چت
             threading.Thread(target=process_instagram_media, args=(media_id, update.message.chat_id, context)).start()
         else:
             update.message.reply_text("رسانه پیدا نشد!")
