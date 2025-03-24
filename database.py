@@ -9,7 +9,8 @@ def initialize_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
         token TEXT,
-        instagram_username TEXT
+        instagram_username TEXT,
+        telegram_username TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS processed_messages (
         message_id TEXT PRIMARY KEY
@@ -18,12 +19,13 @@ def initialize_db():
     conn.close()
     logger.info("Database initialized")
 
-def register_user(telegram_id):
+def register_user(telegram_id, telegram_username):
     try:
         token = str(telegram_id) + "_token"
         conn = sqlite3.connect('database.db')
         c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO users (telegram_id, token) VALUES (?, ?)", (telegram_id, token))
+        c.execute("INSERT OR REPLACE INTO users (telegram_id, token, telegram_username) VALUES (?, ?, ?)", 
+                  (telegram_id, token, telegram_username))
         conn.commit()
         conn.close()
         return token
@@ -72,7 +74,7 @@ def mark_message_processed(message_id):
 def get_all_users():
     conn = sqlite3.connect('database.db')
     c = conn.cursor()
-    c.execute("SELECT telegram_id, token, instagram_username FROM users")
+    c.execute("SELECT telegram_id, token, instagram_username, telegram_username FROM users")
     users = c.fetchall()
     conn.close()
     return users
