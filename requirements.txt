@@ -3,3 +3,5 @@ instagrapi
 instaloader
 flask
 Pillow>=8.1.1
+pydub
+requests
