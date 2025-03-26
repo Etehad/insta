@@ -2,6 +2,7 @@ import os
 import threading
 import time
 import logging
+import random
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from instagrapi import Client
@@ -10,14 +11,11 @@ import database as db
 from api import start_api_server
 from flask import Flask
 
-# تنظیم لاگ با جزئیات بیشتر
+# تنظیم لاگ
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    handlers=[
-        logging.FileHandler("bot.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler("bot.log"), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
@@ -32,6 +30,7 @@ REQUIRED_CHANNELS = [
 ]
 
 ig_client = Client()
+ig_client.delay_range = [1, 5]  # تأخیر تصادفی برای شبیه‌سازی رفتار انسانی
 
 app = Flask(__name__)
 
@@ -41,28 +40,51 @@ def keep_alive():
 
 def login_instagram():
     global ig_client
-    try:
-        if os.path.exists(SESSION_FILE):
-            logger.info(f"Loading Instagram session from {SESSION_FILE}")
-            ig_client.load_settings(SESSION_FILE)
-            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-        else:
-            logger.info(f"Logging into Instagram as {INSTAGRAM_USERNAME}")
-            ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            ig_client.dump_settings(SESSION_FILE)
-        logger.info(f"Successfully logged into Instagram ({INSTAGRAM_USERNAME})")
-    except TwoFactorRequired:
-        logger.error("Two-factor authentication required!")
-        raise
-    except ClientError as e:
-        logger.error(f"Instagram login failed: {str(e)}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error during Instagram login: {str(e)}")
-        raise
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            if os.path.exists(SESSION_FILE):
+                logger.info(f"Loading Instagram session from {SESSION_FILE}")
+                ig_client.load_settings(SESSION_FILE)
+                ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            else:
+                logger.info(f"Logging into Instagram as {INSTAGRAM_USERNAME}")
+                ig_client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                ig_client.dump_settings(SESSION_FILE)
+            logger.info(f"Successfully logged into Instagram ({INSTAGRAM_USERNAME})")
+            return True
+        except TwoFactorRequired:
+            logger.error("Two-factor authentication required!")
+            raise
+        except ClientError as e:
+            logger.error(f"Instagram login failed: {str(e)}")
+            if attempt < max_attempts - 1:
+                time.sleep(random.uniform(5, 15))
+                continue
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during Instagram login: {str(e)}")
+            raise
+    return False
+
+def check_instagram_login(context):
+    while True:
+        try:
+            ig_client.account_info()  # تست وضعیت ورود
+            time.sleep(300)  # اگر لاگین است، هر 5 دقیقه چک می‌کند
+        except ClientError as e:
+            logger.error(f"Instagram session expired: {str(e)}. Attempting to relogin...")
+            if login_instagram():
+                logger.info("Re-login successful!")
+                context.bot.send_message(ADMIN_IDS[0], "ورود مجدد به اینستاگرام با موفقیت انجام شد!")
+            else:
+                logger.error("Re-login failed!")
+                context.bot.send_message(ADMIN_IDS[0], "خطا در ورود مجدد به اینستاگرام!")
+                time.sleep(60)  # در صورت خطا، 1 دقیقه صبر می‌کند
 
 def start(update: Update, context):
     logger.info(f"User {update.effective_user.id} started the bot")
+    db.register_user(update.effective_user.id, update.effective_user.username)
     if not check_membership(update, context):
         return
     keyboard = [
@@ -92,7 +114,8 @@ def admin(update: Update, context):
     user_list = "\n".join([f"ID: {u[0]}, Username: @{u[3] or 'ندارد'}, Token: {u[1]}, Instagram: {u[2] or 'ندارد'}" for u in users])
     keyboard = [
         [InlineKeyboardButton("ارسال پیام خصوصی", callback_data="admin_private")],
-        [InlineKeyboardButton("ارسال پیام جمعی", callback_data="admin_broadcast")]
+        [InlineKeyboardButton("ارسال پیام جمعی", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("مدیریت کانال‌ها", callback_data="admin_channels")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(f"کاربران ربات:\n{user_list}\n\nانتخاب کنید:", reply_markup=reply_markup)
@@ -125,7 +148,19 @@ def button_handler(update: Update, context):
     elif query.data == "admin_private":
         query.edit_message_text("آیدی کاربر (عددی) و پیام خود را به صورت 'آیدی:متن' بفرستید (مثلاً: 12345:سلام چطوری؟)")
     elif query.data == "admin_broadcast":
-        query.edit_message_text("پیام خود را بفرستید تا به همه کاربران ارسال شود (می‌توانید عکس یا ویدیو هم بفرستید)")
+        query.edit_message_text("پیام متنی خود را بفرستید تا به همه کاربران ارسال شود")
+    elif query.data == "admin_channels":
+        channels = "\n".join([f"{c['username']} (ID: {c['chat_id']})" for c in REQUIRED_CHANNELS])
+        keyboard = [
+            [InlineKeyboardButton("اضافه کردن کانال", callback_data="add_channel")],
+            [InlineKeyboardButton("حذف کانال", callback_data="remove_channel")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(f"کانال‌های فعلی:\n{channels or 'هیچ کانالی نیست'}\n\nانتخاب کنید:", reply_markup=reply_markup)
+    elif query.data == "add_channel":
+        query.edit_message_text("لطفاً آیدی کانال (مثل @channel) و chat_id (مثل -100123456789) را به صورت 'chat_id:username' بفرستید")
+    elif query.data == "remove_channel":
+        query.edit_message_text("لطفاً آیدی کانال (مثل @channel) را بفرستید تا حذف شود")
     elif query.data.startswith("download_stories_"):
         username = query.data.split("download_stories_")[1]
         chat_id = query.message.chat_id
@@ -134,9 +169,15 @@ def button_handler(update: Update, context):
         username = query.data.split("track_profile_")[1]
         chat_id = query.message.chat_id
         threading.Thread(target=process_instagram_profile, args=(username, chat_id, context)).start()
+    elif query.data.startswith("get_last_post_"):
+        username = query.data.split("get_last_post_")[1]
+        chat_id = query.message.chat_id
+        threading.Thread(target=download_last_post, args=(username, chat_id, context)).start()
 
 def check_membership(update: Update, context):
     user_id = update.effective_user.id
+    if user_id in ADMIN_IDS:
+        return True
     not_joined = []
     for channel in REQUIRED_CHANNELS:
         try:
@@ -180,7 +221,8 @@ def send_caption_and_cover(media_id, chat_id, context):
             "[TaskForce](https://t.me/task_1_4_1_force)"
         )
         if music_name:
-            cover_caption += f"\nآهنگ: {music_name}"
+            music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
+            cover_caption += f"\nآهنگ: [{music_name}]({music_link})"
         context.bot.send_photo(chat_id=chat_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error sending caption and cover: {str(e)}")
@@ -210,12 +252,47 @@ def process_instagram_profile(username, chat_id, context):
             f"*تعداد استوری‌ها:* {story_count}\n"
             "[TaskForce](https://t.me/task_1_4_1_force)"
         )
-        keyboard = [[InlineKeyboardButton("دریافت استوری‌ها", callback_data=f"download_stories_{username}")]]
+        keyboard = [
+            [InlineKeyboardButton("دریافت استوری‌ها", callback_data=f"download_stories_{username}")],
+            [InlineKeyboardButton("دریافت پست آخر", callback_data=f"get_last_post_{username}")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         context.bot.send_photo(chat_id=chat_id, photo=profile_pic_url, caption=profile_caption, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
         logger.error(f"Error processing Instagram profile: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در پردازش پروفایل: {str(e)}")
+
+def download_last_post(username, chat_id, context):
+    try:
+        logger.info(f"Downloading last post for username: {username}, chat_id: {chat_id}")
+        user_info = ig_client.user_info_by_username(username)
+        user_id = user_info.pk
+        medias = ig_client.user_medias(user_id, amount=1)  # فقط آخرین پست
+        if not medias:
+            context.bot.send_message(chat_id=chat_id, text=f"پستی برای {username} پیدا نشد!")
+            return
+        media = medias[0]
+        if media.media_type == 1:  # عکس
+            media_url = str(media.thumbnail_url)
+            caption = media.caption_text or "بدون کپشن"
+            media_caption = f"پست آخر از [{username}](https://www.instagram.com/{username}/)\n{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
+            context.bot.send_photo(chat_id=chat_id, photo=media_url, caption=media_caption, parse_mode="Markdown")
+        elif media.media_type == 2:  # ویدیو
+            media_url = str(media.video_url)
+            caption = media.caption_text or "بدون کپشن"
+            music_name = None
+            if hasattr(media, 'clips_metadata') and media.clips_metadata:
+                if 'music_info' in media.clips_metadata and media.clips_metadata['music_info']:
+                    music_name = media.clips_metadata['music_info'].get('title', None)
+            media_caption = f"پست آخر از [{username}](https://www.instagram.com/{username}/)\n{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
+            if music_name:
+                music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
+                media_caption += f"\nآهنگ: [{music_name}]({music_link})"
+            context.bot.send_video(chat_id=chat_id, video=media_url, caption=media_caption, parse_mode="Markdown")
+        context.bot.send_message(chat_id=chat_id, text=f"پست آخر {username} ارسال شد!")
+    except Exception as e:
+        logger.error(f"Error downloading last post: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود پست آخر: {str(e)}")
 
 def download_instagram_stories(username, chat_id, context):
     try:
@@ -233,7 +310,14 @@ def download_instagram_stories(username, chat_id, context):
                 context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
             elif story.media_type == 2:
                 story_url = str(story.video_url)
+                music_name = None
+                if hasattr(story, 'clips_metadata') and story.clips_metadata:
+                    if 'music_info' in story.clips_metadata and story.clips_metadata['music_info']:
+                        music_name = story.clips_metadata['music_info'].get('title', None)
                 story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
+                if music_name:
+                    music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
+                    story_caption += f"\nآهنگ: [{music_name}]({music_link})"
                 context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
         context.bot.send_message(chat_id=chat_id, text=f"استوری‌های {username} با موفقیت ارسال شدند!")
     except Exception as e:
@@ -252,7 +336,14 @@ def process_instagram_story_link(url, chat_id, context):
             context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
         elif story_info.media_type == 2:
             story_url = str(story_info.video_url)
+            music_name = None
+            if hasattr(story_info, 'clips_metadata') and story_info.clips_metadata:
+                if 'music_info' in story_info.clips_metadata and story_info.clips_metadata['music_info']:
+                    music_name = story_info.clips_metadata['music_info'].get('title', None)
             story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
+            if music_name:
+                music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
+                story_caption += f"\nآهنگ: [{music_name}]({music_link})"
             context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
         context.bot.send_message(chat_id=chat_id, text="استوری با موفقیت ارسال شد!")
     except Exception as e:
@@ -267,11 +358,10 @@ def track_follower(page1, page2, chat_id, context):
         user1_id = user1_info.pk
         user2_id = user2_info.pk
         
-        # بررسی فالوئرها
-        followers = ig_client.user_followers(user2_id, amount=1000)  # حداکثر 1000 فالوئر چک می‌شه
-        is_follower = str(user1_id) in followers
+        # بررسی اینکه آیا user1 جزو فالوورهای user2 است
+        is_following = ig_client.user_following(user1_id, amount=0).get(str(user2_id)) is not None
         
-        response = "هست" if is_follower else "نیست"
+        response = f"{page1}، {page2} را دنبال می‌کند" if is_following else f"{page1}، {page2} را دنبال نمی‌کند"
         keyboard = [
             [InlineKeyboardButton(f"اطلاعات {page1}", callback_data=f"track_profile_{page1}"),
              InlineKeyboardButton(f"اطلاعات {page2}", callback_data=f"track_profile_{page2}")]
@@ -285,7 +375,7 @@ def track_follower(page1, page2, chat_id, context):
 def search_instagram(query, chat_id, context):
     try:
         logger.info(f"Searching Instagram for query: {query}")
-        results = ig_client.search_users(query)[:5]
+        results = ig_client.search_users(query)[:10]  # افزایش به 10 نتیجه
         if not results:
             context.bot.send_message(chat_id=chat_id, text="نتیجه‌ای پیدا نشد!")
             return
@@ -397,31 +487,41 @@ def handle_admin_message(update: Update, context):
     if update.message.chat.type != "private":
         return
     
-    text = update.message.text or ""  # اگر فقط عکس/ویدیو باشه، متن خالی می‌مونه
-    if text and ":" in text:  # پیام خصوصی
+    text = update.message.text or ""
+    if not text:
+        update.message.reply_text("فقط پیام متنی در بخش ادمین قابل قبول است!")
+        return
+    
+    if ":" in text:
         user_id, message = text.split(":", 1)
         try:
             user_id = int(user_id.strip())
-            if update.message.photo:
-                context.bot.send_photo(chat_id=user_id, photo=update.message.photo[-1].file_id, caption=message, parse_mode="Markdown")
-            elif update.message.video:
-                context.bot.send_video(chat_id=user_id, video=update.message.video.file_id, caption=message, parse_mode="Markdown")
-            else:
-                context.bot.send_message(chat_id=user_id, text=message, parse_mode="Markdown")
+            context.bot.send_message(chat_id=user_id, text=message, parse_mode="Markdown")
             update.message.reply_text(f"پیام به {user_id} ارسال شد!")
         except Exception as e:
             update.message.reply_text(f"خطا در ارسال پیام: {str(e)}")
-    else:  # پیام جمعی
+    elif text.startswith("chat_id:"):
+        try:
+            chat_id, username = text.split(":", 1)
+            chat_id = chat_id.strip()
+            username = username.strip()
+            REQUIRED_CHANNELS.append({"chat_id": chat_id, "username": username})
+            update.message.reply_text(f"کانال {username} اضافه شد!")
+        except Exception as e:
+            update.message.reply_text(f"خطا در اضافه کردن کانال: {str(e)}")
+    elif text.startswith("@"):
+        try:
+            username = text.strip()
+            REQUIRED_CHANNELS[:] = [c for c in REQUIRED_CHANNELS if c["username"] != username]
+            update.message.reply_text(f"کانال {username} حذف شد!")
+        except Exception as e:
+            update.message.reply_text(f"خطا در حذف کانال: {str(e)}")
+    else:
         users = db.get_all_users()
         for user in users:
             try:
                 user_id = user[0]
-                if update.message.photo:
-                    context.bot.send_photo(chat_id=user_id, photo=update.message.photo[-1].file_id, caption=text, parse_mode="Markdown")
-                elif update.message.video:
-                    context.bot.send_video(chat_id=user_id, video=update.message.video.file_id, caption=text, parse_mode="Markdown")
-                elif text:  # فقط متن
-                    context.bot.send_message(chat_id=user_id, text=text, parse_mode="Markdown")
+                context.bot.send_message(chat_id=user_id, text=text, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Error sending broadcast to {user_id}: {str(e)}")
         update.message.reply_text("پیام به همه کاربران ارسال شد!")
@@ -449,11 +549,14 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("admin", admin))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
-    dp.add_handler(MessageHandler(Filters.photo | Filters.video | Filters.text, handle_admin_message))
+    dp.add_handler(MessageHandler(Filters.text, handle_admin_message))
     dp.add_handler(CallbackQueryHandler(button_handler))
 
     instagram_thread = threading.Thread(target=check_instagram_dms, args=(dp,), daemon=True)
     instagram_thread.start()
+
+    login_check_thread = threading.Thread(target=check_instagram_login, args=(dp,), daemon=True)
+    login_check_thread.start()
 
     updater.start_polling()
     updater.idle()
