@@ -3,6 +3,8 @@ import threading
 import time
 import logging
 import random
+import requests
+from pydub import AudioSegment
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from instagrapi import Client
@@ -24,13 +26,14 @@ INSTAGRAM_USERNAME = "etehad141"
 INSTAGRAM_PASSWORD = "Aa123456"
 SESSION_FILE = "session.json"
 ADMIN_IDS = [6473845417, 1516721587]
+AUDD_API_TOKEN = "2ae503198692f8d4bbd627874f788272"
 
 REQUIRED_CHANNELS = [
     {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
 ]
 
 ig_client = Client()
-ig_client.delay_range = [1, 5]  # تأخیر تصادفی برای شبیه‌سازی رفتار انسانی
+ig_client.delay_range = [1, 5]
 
 app = Flask(__name__)
 
@@ -70,8 +73,8 @@ def login_instagram():
 def check_instagram_login(context):
     while True:
         try:
-            ig_client.account_info()  # تست وضعیت ورود
-            time.sleep(300)  # اگر لاگین است، هر 5 دقیقه چک می‌کند
+            ig_client.account_info()
+            time.sleep(300)
         except ClientError as e:
             logger.error(f"Instagram session expired: {str(e)}. Attempting to relogin...")
             if login_instagram():
@@ -80,7 +83,39 @@ def check_instagram_login(context):
             else:
                 logger.error("Re-login failed!")
                 context.bot.send_message(ADMIN_IDS[0], "خطا در ورود مجدد به اینستاگرام!")
-                time.sleep(60)  # در صورت خطا، 1 دقیقه صبر می‌کند
+                time.sleep(60)
+
+def analyze_audio(video_url):
+    try:
+        # دانلود ویدیو
+        response = requests.get(video_url)
+        with open("temp_video.mp4", "wb") as f:
+            f.write(response.content)
+        
+        # تبدیل به MP3
+        audio = AudioSegment.from_file("temp_video.mp4")
+        audio.export("temp_audio.mp3", format="mp3")
+        
+        # ارسال به AudD API
+        with open("temp_audio.mp3", "rb") as f:
+            response = requests.post(
+                "https://api.audd.io/",
+                files={"file": f},
+                data={"api_token": AUDD_API_TOKEN}
+            )
+        result = response.json()
+        if result.get("status") == "success" and result.get("result"):
+            songs = [song["title"] for song in result["result"]]
+        else:
+            songs = []
+        
+        # حذف فایل‌های موقت
+        os.remove("temp_video.mp4")
+        os.remove("temp_audio.mp3")
+        return songs
+    except Exception as e:
+        logger.error(f"Error analyzing audio: {str(e)}")
+        return []
 
 def start(update: Update, context):
     logger.info(f"User {update.effective_user.id} started the bot")
@@ -196,7 +231,7 @@ def process_instagram_media(media_id, chat_id, context):
     try:
         logger.info(f"Processing Instagram media for chat_id: {chat_id}, media_id: {media_id}")
         media_info = ig_client.media_info(media_id)
-        if media_info.media_type == 2:  # ویدیو یا ریل
+        if media_info.media_type == 2:
             video_url = str(media_info.video_url)
             keyboard = [[InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -211,18 +246,28 @@ def send_caption_and_cover(media_id, chat_id, context):
         thumbnail_url = str(media_info.thumbnail_url)
         caption = media_info.caption_text or "بدون کپشن"
         page_id = media_info.user.username
-        music_name = None
+        music_names = []
+        
+        # بررسی متادیتا
         if hasattr(media_info, 'clips_metadata') and media_info.clips_metadata:
             if 'music_info' in media_info.clips_metadata and media_info.clips_metadata['music_info']:
-                music_name = media_info.clips_metadata['music_info'].get('title', None)
+                music_names.append(media_info.clips_metadata['music_info'].get('title', None))
+        
+        # تحلیل صدای ویدیو
+        if media_info.video_url:
+            songs = analyze_audio(str(media_info.video_url))
+            music_names.extend(songs)
+        
         cover_caption = (
             f"*کپشن خود پست اینستاگرام:*\n{caption}\n"
             f"آیدی پیج: [{page_id}](https://www.instagram.com/{page_id}/)\n"
             "[TaskForce](https://t.me/task_1_4_1_force)"
         )
-        if music_name:
-            music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
-            cover_caption += f"\nآهنگ: [{music_name}]({music_link})"
+        if music_names:
+            music_section = "\n*آهنگ‌ها:*\n" + "\n".join(
+                [f"- [{name}](https://www.google.com/search?q={name.replace(' ', '+')})" for name in set(music_names)]
+            )
+            cover_caption += music_section
         context.bot.send_photo(chat_id=chat_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error sending caption and cover: {str(e)}")
@@ -267,27 +312,31 @@ def download_last_post(username, chat_id, context):
         logger.info(f"Downloading last post for username: {username}, chat_id: {chat_id}")
         user_info = ig_client.user_info_by_username(username)
         user_id = user_info.pk
-        medias = ig_client.user_medias(user_id, amount=1)  # فقط آخرین پست
+        medias = ig_client.user_medias(user_id, amount=1)
         if not medias:
             context.bot.send_message(chat_id=chat_id, text=f"پستی برای {username} پیدا نشد!")
             return
         media = medias[0]
-        if media.media_type == 1:  # عکس
+        if media.media_type == 1:
             media_url = str(media.thumbnail_url)
             caption = media.caption_text or "بدون کپشن"
             media_caption = f"پست آخر از [{username}](https://www.instagram.com/{username}/)\n{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
             context.bot.send_photo(chat_id=chat_id, photo=media_url, caption=media_caption, parse_mode="Markdown")
-        elif media.media_type == 2:  # ویدیو
+        elif media.media_type == 2:
             media_url = str(media.video_url)
             caption = media.caption_text or "بدون کپشن"
-            music_name = None
+            music_names = []
             if hasattr(media, 'clips_metadata') and media.clips_metadata:
                 if 'music_info' in media.clips_metadata and media.clips_metadata['music_info']:
-                    music_name = media.clips_metadata['music_info'].get('title', None)
+                    music_names.append(media.clips_metadata['music_info'].get('title', None))
+            songs = analyze_audio(media_url)
+            music_names.extend(songs)
             media_caption = f"پست آخر از [{username}](https://www.instagram.com/{username}/)\n{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
-            if music_name:
-                music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
-                media_caption += f"\nآهنگ: [{music_name}]({music_link})"
+            if music_names:
+                music_section = "\n*آهنگ‌ها:*\n" + "\n".join(
+                    [f"- [{name}](https://www.google.com/search?q={name.replace(' ', '+')})" for name in set(music_names)]
+                )
+                media_caption += music_section
             context.bot.send_video(chat_id=chat_id, video=media_url, caption=media_caption, parse_mode="Markdown")
         context.bot.send_message(chat_id=chat_id, text=f"پست آخر {username} ارسال شد!")
     except Exception as e:
@@ -310,14 +359,18 @@ def download_instagram_stories(username, chat_id, context):
                 context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
             elif story.media_type == 2:
                 story_url = str(story.video_url)
-                music_name = None
+                music_names = []
                 if hasattr(story, 'clips_metadata') and story.clips_metadata:
                     if 'music_info' in story.clips_metadata and story.clips_metadata['music_info']:
-                        music_name = story.clips_metadata['music_info'].get('title', None)
+                        music_names.append(story.clips_metadata['music_info'].get('title', None))
+                songs = analyze_audio(story_url)
+                music_names.extend(songs)
                 story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
-                if music_name:
-                    music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
-                    story_caption += f"\nآهنگ: [{music_name}]({music_link})"
+                if music_names:
+                    music_section = "\n*آهنگ‌ها:*\n" + "\n".join(
+                        [f"- [{name}](https://www.google.com/search?q={name.replace(' ', '+')})" for name in set(music_names)]
+                    )
+                    story_caption += music_section
                 context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
         context.bot.send_message(chat_id=chat_id, text=f"استوری‌های {username} با موفقیت ارسال شدند!")
     except Exception as e:
@@ -336,14 +389,18 @@ def process_instagram_story_link(url, chat_id, context):
             context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
         elif story_info.media_type == 2:
             story_url = str(story_info.video_url)
-            music_name = None
+            music_names = []
             if hasattr(story_info, 'clips_metadata') and story_info.clips_metadata:
                 if 'music_info' in story_info.clips_metadata and story_info.clips_metadata['music_info']:
-                    music_name = story_info.clips_metadata['music_info'].get('title', None)
+                    music_names.append(story_info.clips_metadata['music_info'].get('title', None))
+            songs = analyze_audio(story_url)
+            music_names.extend(songs)
             story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
-            if music_name:
-                music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
-                story_caption += f"\nآهنگ: [{music_name}]({music_link})"
+            if music_names:
+                music_section = "\n*آهنگ‌ها:*\n" + "\n".join(
+                    [f"- [{name}](https://www.google.com/search?q={name.replace(' ', '+')})" for name in set(music_names)]
+                )
+                story_caption += music_section
             context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
         context.bot.send_message(chat_id=chat_id, text="استوری با موفقیت ارسال شد!")
     except Exception as e:
@@ -358,7 +415,6 @@ def track_follower(page1, page2, chat_id, context):
         user1_id = user1_info.pk
         user2_id = user2_info.pk
         
-        # بررسی اینکه آیا user1 جزو فالوورهای user2 است
         is_following = ig_client.user_following(user1_id, amount=0).get(str(user2_id)) is not None
         
         response = f"{page1}، {page2} را دنبال می‌کند" if is_following else f"{page1}، {page2} را دنبال نمی‌کند"
@@ -375,7 +431,7 @@ def track_follower(page1, page2, chat_id, context):
 def search_instagram(query, chat_id, context):
     try:
         logger.info(f"Searching Instagram for query: {query}")
-        results = ig_client.search_users(query)[:10]  # افزایش به 10 نتیجه
+        results = ig_client.search_users(query)[:10]
         if not results:
             context.bot.send_message(chat_id=chat_id, text="نتیجه‌ای پیدا نشد!")
             return
