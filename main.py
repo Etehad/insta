@@ -89,9 +89,9 @@ def start(update: Update, context):
         return
     keyboard = [
         [InlineKeyboardButton("دریافت توکن اتصال به اینستاگرام", callback_data="get_token")],
-        [InlineKeyboardButton("راهنمای اتصال به اینستاگرام", callback_data="instagram_help")],
         [InlineKeyboardButton("ارسال لینک مستقیم", callback_data="manual_link")],
-        [InlineKeyboardButton("دریافت پروفایل و استوری", callback_data="get_profile")]
+        [InlineKeyboardButton("دریافت پروفایل و استوری", callback_data="get_profile")],
+        [InlineKeyboardButton("راهنمای ویدیویی", callback_data="instagram_help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(
@@ -119,6 +119,27 @@ def admin(update: Update, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(f"کاربران ربات:\n{user_list}\n\nانتخاب کنید:", reply_markup=reply_markup)
+
+def broadcast(update: Update, context):
+    if update.effective_user.id not in ADMIN_IDS:
+        update.message.reply_text("شما دسترسی به این دستور ندارید!")
+        return
+    if update.message.chat.type != "private":
+        update.message.reply_text("این دستور فقط در چت خصوصی قابل استفاده است!")
+        return
+    if not context.args:
+        update.message.reply_text("لطفاً پیام مورد نظر را بعد از دستور وارد کنید! مثال: /broadcast سلام")
+        return
+    
+    message = " ".join(context.args)
+    users = db.get_all_users()
+    for user in users:
+        try:
+            user_id = user[0]
+            context.bot.send_message(chat_id=user_id, text=message, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error sending broadcast to {user_id}: {str(e)}")
+    update.message.reply_text(f"پیام '{message}' به همه کاربران ارسال شد!")
 
 def button_handler(update: Update, context):
     query = update.callback_query
@@ -148,7 +169,7 @@ def button_handler(update: Update, context):
     elif query.data == "admin_private":
         query.edit_message_text("آیدی کاربر (عددی) و پیام خود را به صورت 'آیدی:متن' بفرستید (مثلاً: 12345:سلام چطوری؟)")
     elif query.data == "admin_broadcast":
-        query.edit_message_text("پیام متنی خود را بفرستید تا به همه کاربران ارسال شود")
+        query.edit_message_text("برای ارسال پیام همگانی از دستور /broadcast استفاده کنید. مثال: /broadcast سلام")
     elif query.data == "admin_channels":
         channels = "\n".join([f"{c['username']} (ID: {c['chat_id']})" for c in REQUIRED_CHANNELS])
         keyboard = [
@@ -393,8 +414,8 @@ def check_instagram_dms(context):
                                 threading.Thread(target=process_instagram_story_link, args=(story_url, telegram_id, context)).start()
         except Exception as e:
             logger.error(f"Error checking Instagram DMs: {str(e)}")
-            time.sleep(5)  # کاهش فاصله در صورت خطا
-        time.sleep(5)  # چک کردن هر 5 ثانیه
+            time.sleep(30)  # بازگشت به 30 ثانیه در صورت خطا
+        time.sleep(30)  # چک کردن هر 30 ثانیه
 
 def handle_link(update: Update, context):
     if not check_membership(update, context):
@@ -490,15 +511,6 @@ def handle_admin_message(update: Update, context):
             update.message.reply_text(f"کانال {username} حذف شد!")
         except Exception as e:
             update.message.reply_text(f"خطا در حذف کانال: {str(e)}")
-    else:
-        users = db.get_all_users()
-        for user in users:
-            try:
-                user_id = user[0]
-                context.bot.send_message(chat_id=user_id, text=text, parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Error sending broadcast to {user_id}: {str(e)}")
-        update.message.reply_text("پیام به همه کاربران ارسال شد!")
 
 def main():
     logger.info("Starting bot...")
@@ -522,6 +534,7 @@ def main():
     dp = updater.dispatcher
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("admin", admin))
+    dp.add_handler(CommandHandler("broadcast", broadcast))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
     dp.add_handler(MessageHandler(Filters.text, handle_admin_message))
     dp.add_handler(CallbackQueryHandler(button_handler))
