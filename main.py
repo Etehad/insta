@@ -30,7 +30,7 @@ REQUIRED_CHANNELS = [
 ]
 
 ig_client = Client()
-ig_client.delay_range = [1, 3]  # کاهش تأخیر برای افزایش سرعت
+ig_client.delay_range = [1, 5]
 
 app = Flask(__name__)
 
@@ -89,9 +89,9 @@ def start(update: Update, context):
         return
     keyboard = [
         [InlineKeyboardButton("دریافت توکن اتصال به اینستاگرام", callback_data="get_token")],
+        [InlineKeyboardButton("راهنمای اتصال به اینستاگرام", callback_data="instagram_help")],
         [InlineKeyboardButton("ارسال لینک مستقیم", callback_data="manual_link")],
-        [InlineKeyboardButton("دریافت پروفایل و استوری", callback_data="get_profile")],
-        [InlineKeyboardButton("راهنمای ویدیویی", callback_data="instagram_help")]
+        [InlineKeyboardButton("دریافت پروفایل و استوری", callback_data="get_profile")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(
@@ -119,27 +119,6 @@ def admin(update: Update, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(f"کاربران ربات:\n{user_list}\n\nانتخاب کنید:", reply_markup=reply_markup)
-
-def broadcast(update: Update, context):
-    if update.effective_user.id not in ADMIN_IDS:
-        update.message.reply_text("شما دسترسی به این دستور ندارید!")
-        return
-    if update.message.chat.type != "private":
-        update.message.reply_text("این دستور فقط در چت خصوصی قابل استفاده است!")
-        return
-    if not context.args:
-        update.message.reply_text("لطفاً پیام مورد نظر را بعد از دستور وارد کنید! مثال: /broadcast سلام")
-        return
-    
-    message = " ".join(context.args)
-    users = db.get_all_users()
-    for user in users:
-        try:
-            user_id = user[0]
-            context.bot.send_message(chat_id=user_id, text=message, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Error sending broadcast to {user_id}: {str(e)}")
-    update.message.reply_text(f"پیام '{message}' به همه کاربران ارسال شد!")
 
 def button_handler(update: Update, context):
     query = update.callback_query
@@ -169,7 +148,7 @@ def button_handler(update: Update, context):
     elif query.data == "admin_private":
         query.edit_message_text("آیدی کاربر (عددی) و پیام خود را به صورت 'آیدی:متن' بفرستید (مثلاً: 12345:سلام چطوری؟)")
     elif query.data == "admin_broadcast":
-        query.edit_message_text("برای ارسال پیام همگانی از دستور /broadcast استفاده کنید. مثال: /broadcast سلام")
+        query.edit_message_text("پیام متنی خود را بفرستید تا به همه کاربران ارسال شود")
     elif query.data == "admin_channels":
         channels = "\n".join([f"{c['username']} (ID: {c['chat_id']})" for c in REQUIRED_CHANNELS])
         keyboard = [
@@ -222,9 +201,6 @@ def process_instagram_media(media_id, chat_id, context):
             keyboard = [[InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             context.bot.send_video(chat_id=chat_id, video=video_url, caption="[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown", reply_markup=reply_markup)
-        elif media_info.media_type == 1:  # عکس
-            photo_url = str(media_info.thumbnail_url)
-            context.bot.send_photo(chat_id=chat_id, photo=photo_url, caption="[TaskForce](https://t.me/task_1_4_1_force)", parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error processing Instagram media: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود: {str(e)}")
@@ -235,11 +211,18 @@ def send_caption_and_cover(media_id, chat_id, context):
         thumbnail_url = str(media_info.thumbnail_url)
         caption = media_info.caption_text or "بدون کپشن"
         page_id = media_info.user.username
+        music_name = None
+        if hasattr(media_info, 'clips_metadata') and media_info.clips_metadata:
+            if 'music_info' in media_info.clips_metadata and media_info.clips_metadata['music_info']:
+                music_name = media_info.clips_metadata['music_info'].get('title', None)
         cover_caption = (
             f"*کپشن خود پست اینستاگرام:*\n{caption}\n"
             f"آیدی پیج: [{page_id}](https://www.instagram.com/{page_id}/)\n"
             "[TaskForce](https://t.me/task_1_4_1_force)"
         )
+        if music_name:
+            music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
+            cover_caption += f"\n*آهنگ:* [{music_name}]({music_link})"
         context.bot.send_photo(chat_id=chat_id, photo=thumbnail_url, caption=cover_caption, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error sending caption and cover: {str(e)}")
@@ -297,7 +280,14 @@ def download_last_post(username, chat_id, context):
         elif media.media_type == 2:
             media_url = str(media.video_url)
             caption = media.caption_text or "بدون کپشن"
+            music_name = None
+            if hasattr(media, 'clips_metadata') and media.clips_metadata:
+                if 'music_info' in media.clips_metadata and media.clips_metadata['music_info']:
+                    music_name = media.clips_metadata['music_info'].get('title', None)
             media_caption = f"پست آخر از [{username}](https://www.instagram.com/{username}/)\n{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
+            if music_name:
+                music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
+                media_caption += f"\n*آهنگ:* [{music_name}]({music_link})"
             context.bot.send_video(chat_id=chat_id, video=media_url, caption=media_caption, parse_mode="Markdown")
         context.bot.send_message(chat_id=chat_id, text=f"پست آخر {username} ارسال شد!")
     except Exception as e:
@@ -320,7 +310,14 @@ def download_instagram_stories(username, chat_id, context):
                 context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
             elif story.media_type == 2:
                 story_url = str(story.video_url)
+                music_name = None
+                if hasattr(story, 'clips_metadata') and story.clips_metadata:
+                    if 'music_info' in story.clips_metadata and story.clips_metadata['music_info']:
+                        music_name = media_info.clips_metadata['music_info'].get('title', None)
                 story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
+                if music_name:
+                    music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
+                    story_caption += f"\n*آهنگ:* [{music_name}]({music_link})"
                 context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
         context.bot.send_message(chat_id=chat_id, text=f"استوری‌های {username} با موفقیت ارسال شدند!")
     except Exception as e:
@@ -339,7 +336,14 @@ def process_instagram_story_link(url, chat_id, context):
             context.bot.send_photo(chat_id=chat_id, photo=story_url, caption=story_caption, parse_mode="Markdown")
         elif story_info.media_type == 2:
             story_url = str(story_info.video_url)
+            music_name = None
+            if hasattr(story_info, 'clips_metadata') and story_info.clips_metadata:
+                if 'music_info' in story_info.clips_metadata and story_info.clips_metadata['music_info']:
+                    music_name = story_info.clips_metadata['music_info'].get('title', None)
             story_caption = f"استوری از [{username}](https://www.instagram.com/{username}/)\n[TaskForce](https://t.me/task_1_4_1_force)"
+            if music_name:
+                music_link = f"https://www.google.com/search?q={music_name.replace(' ', '+')}"
+                story_caption += f"\n*آهنگ:* [{music_name}]({music_link})"
             context.bot.send_video(chat_id=chat_id, video=story_url, caption=story_caption, parse_mode="Markdown")
         context.bot.send_message(chat_id=chat_id, text="استوری با موفقیت ارسال شد!")
     except Exception as e:
@@ -414,8 +418,8 @@ def check_instagram_dms(context):
                                 threading.Thread(target=process_instagram_story_link, args=(story_url, telegram_id, context)).start()
         except Exception as e:
             logger.error(f"Error checking Instagram DMs: {str(e)}")
-            time.sleep(30)  # بازگشت به 30 ثانیه در صورت خطا
-        time.sleep(30)  # چک کردن هر 30 ثانیه
+            time.sleep(60)
+        time.sleep(30)
 
 def handle_link(update: Update, context):
     if not check_membership(update, context):
@@ -511,6 +515,15 @@ def handle_admin_message(update: Update, context):
             update.message.reply_text(f"کانال {username} حذف شد!")
         except Exception as e:
             update.message.reply_text(f"خطا در حذف کانال: {str(e)}")
+    else:
+        users = db.get_all_users()
+        for user in users:
+            try:
+                user_id = user[0]
+                context.bot.send_message(chat_id=user_id, text=text, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Error sending broadcast to {user_id}: {str(e)}")
+        update.message.reply_text("پیام به همه کاربران ارسال شد!")
 
 def main():
     logger.info("Starting bot...")
@@ -534,7 +547,6 @@ def main():
     dp = updater.dispatcher
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("admin", admin))
-    dp.add_handler(CommandHandler("broadcast", broadcast))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
     dp.add_handler(MessageHandler(Filters.text, handle_admin_message))
     dp.add_handler(CallbackQueryHandler(button_handler))
