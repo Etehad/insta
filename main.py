@@ -29,6 +29,8 @@ REQUIRED_CHANNELS = [
     {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
 ]
 
+GROUP_CHAT_IDS = ["-1002294804720"]  # لیست گروه‌ها برای ارسال پیام با /gap و /broadcast
+
 ig_client = Client()
 ig_client.delay_range = [3, 5]  # کاهش تأخیر برای افزایش سرعت
 
@@ -70,7 +72,6 @@ def login_instagram():
 def check_instagram_login(context):
     logged_in = False
     try:
-        # تلاش اولیه برای لاگین
         logged_in = login_instagram()
         if not logged_in:
             raise ClientError("Initial login failed")
@@ -132,6 +133,7 @@ def admin(update: Update, context):
     keyboard = [
         [InlineKeyboardButton("ارسال پیام خصوصی (/pv)", callback_data="admin_private")],
         [InlineKeyboardButton("ارسال پیام جمعی (/broadcast)", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("ارسال پیام به گروه‌ها (/gap)", callback_data="admin_group")],
         [InlineKeyboardButton("مدیریت کانال‌ها (/set)", callback_data="admin_channels")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -149,14 +151,40 @@ def broadcast(update: Update, context):
         return
     
     message = " ".join(context.args)
+    # ارسال به کاربران
     users = db.get_all_users()
     for user in users:
         try:
             user_id = user[0]
             context.bot.send_message(chat_id=user_id, text=message, parse_mode="Markdown")
         except Exception as e:
-            logger.error(f"Error sending broadcast to {user_id}: {str(e)}")
-    update.message.reply_text(f"پیام '{message}' به همه کاربران ارسال شد!")
+            logger.error(f"Error sending broadcast to user {user_id}: {str(e)}")
+    # ارسال به گروه‌ها
+    for group_id in GROUP_CHAT_IDS:
+        try:
+            context.bot.send_message(chat_id=group_id, text=message, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error sending broadcast to group {group_id}: {str(e)}")
+    update.message.reply_text(f"پیام '{message}' به همه کاربران و گروه‌ها ارسال شد!")
+
+def gap(update: Update, context):
+    if update.effective_user.id not in ADMIN_IDS:
+        update.message.reply_text("شما دسترسی به این دستور ندارید!")
+        return
+    if update.message.chat.type != "private":
+        update.message.reply_text("این دستور فقط در چت خصوصی قابل استفاده است!")
+        return
+    if not context.args:
+        update.message.reply_text("لطفاً پیام مورد نظر را بعد از دستور وارد کنید! مثال: /gap سلام")
+        return
+    
+    message = " ".join(context.args)
+    for group_id in GROUP_CHAT_IDS:
+        try:
+            context.bot.send_message(chat_id=group_id, text=message, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error sending message to group {group_id}: {str(e)}")
+    update.message.reply_text(f"پیام '{message}' به همه گروه‌ها ارسال شد!")
 
 def pv(update: Update, context):
     if update.effective_user.id not in ADMIN_IDS:
@@ -235,6 +263,8 @@ def button_handler(update: Update, context):
         query.edit_message_text("برای ارسال پیام خصوصی از دستور /pv استفاده کنید. مثال: /pv 12345 سلام چطوری؟")
     elif query.data == "admin_broadcast":
         query.edit_message_text("برای ارسال پیام همگانی از دستور /broadcast استفاده کنید. مثال: /broadcast سلام")
+    elif query.data == "admin_group":
+        query.edit_message_text("برای ارسال پیام به گروه‌ها از دستور /gap استفاده کنید. مثال: /gap سلام")
     elif query.data == "admin_channels":
         query.edit_message_text("برای مدیریت کانال‌ها از دستور /set استفاده کنید.\n"
                                "اضافه کردن: /set add chat_id username\n"
@@ -305,6 +335,7 @@ def send_caption_and_cover(media_id, chat_id, context):
 def process_instagram_profile(username, chat_id, context):
     try:
         logger.info(f"Processing Instagram profile for username: {username}, chat_id: {chat_id}")
+        # استفاده مستقیم از API خصوصی برای سرعت بیشتر
         user_info = ig_client.user_info_by_username(username)
         profile_pic_url = str(user_info.profile_pic_url_hd)
         full_name = user_info.full_name or username
@@ -346,16 +377,16 @@ def download_last_post(username, chat_id, context):
             context.bot.send_message(chat_id=chat_id, text=f"پستی برای {username} پیدا نشد!")
             return
         media = medias[0]
+        keyboard = [[InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media.pk}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         if media.media_type == 1:
             media_url = str(media.thumbnail_url)
-            caption = media.caption_text or "بدون کپشن"
-            media_caption = f"پست آخر از [{username}](https://www.instagram.com/{username}/)\n{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
-            context.bot.send_photo(chat_id=chat_id, photo=media_url, caption=media_caption, parse_mode="Markdown")
+            media_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
+            context.bot.send_photo(chat_id=chat_id, photo=media_url, caption=media_caption, parse_mode="Markdown", reply_markup=reply_markup)
         elif media.media_type == 2:
             media_url = str(media.video_url)
-            caption = media.caption_text or "بدون کپشن"
-            media_caption = f"پست آخر از [{username}](https://www.instagram.com/{username}/)\n{caption}\n[TaskForce](https://t.me/task_1_4_1_force)"
-            context.bot.send_video(chat_id=chat_id, video=media_url, caption=media_caption, parse_mode="Markdown")
+            media_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
+            context.bot.send_video(chat_id=chat_id, video=media_url, caption=media_caption, parse_mode="Markdown", reply_markup=reply_markup)
         context.bot.send_message(chat_id=chat_id, text=f"پست آخر {username} ارسال شد!")
     except Exception as e:
         logger.error(f"Error downloading last post: {str(e)}")
@@ -475,8 +506,8 @@ def check_instagram_dms(context):
                                 threading.Thread(target=process_instagram_story_link, args=(story_url, telegram_id, context)).start()
         except Exception as e:
             logger.error(f"Error checking Instagram DMs: {str(e)}")
-            time.sleep(30)  # بازگشت به 30 ثانیه در صورت خطا
-        time.sleep(30)  # چک کردن هر 30 ثانیه
+            time.sleep(30)
+        time.sleep(30)
 
 def handle_link(update: Update, context):
     if not check_membership(update, context):
@@ -545,9 +576,9 @@ def handle_admin_message(update: Update, context):
     
     text = update.message.text or ""
     if not text:
-        update.message.reply_text("لطفاً از دستورات /pv، /broadcast یا /set استفاده کنید!")
+        update.message.reply_text("لطفاً از دستورات /pv، /broadcast، /gap یا /set استفاده کنید!")
         return
-    update.message.reply_text("لطفاً از دستورات /pv، /broadcast یا /set استفاده کنید!")
+    update.message.reply_text("لطفاً از دستورات /pv، /broadcast، /gap یا /set استفاده کنید!")
 
 def main():
     logger.info("Starting bot...")
@@ -564,6 +595,7 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("admin", admin))
     dp.add_handler(CommandHandler("broadcast", broadcast))
+    dp.add_handler(CommandHandler("gap", gap))
     dp.add_handler(CommandHandler("pv", pv))
     dp.add_handler(CommandHandler("set", set_channel))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_link))
