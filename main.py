@@ -460,7 +460,7 @@ def search_instagram(query, chat_id, context):
 def get_random_explore_post(chat_id, context):
     try:
         logger.info(f"Fetching random post from Instagram explore for chat_id: {chat_id}")
-        explore_posts = ig_client.explore(amount=10)  # دریافت 10 پست از اکسپلور
+        explore_posts = ig_client.explore()  # دریافت پست‌ها از اکسپلور
         if not explore_posts:
             context.bot.send_message(chat_id=chat_id, text="پستی در اکسپلور پیدا نشد!")
             return
