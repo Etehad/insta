@@ -356,7 +356,7 @@ def process_instagram_profile(username, chat_id, context):
             f"*تعداد پست‌ها:* {posts}\n"
             f"*وضعیت پیج:* {is_private}\n"
             f"*تعداد استوری‌ها:* {story_count}\n"
-            "[TaskForce](https://t.me/task_1_4_1_force)"
+            "[TaskForce](https://t.me/task_1_4_1_force]"
         )
         keyboard = [
             [InlineKeyboardButton("دریافت استوری‌ها", callback_data=f"download_stories_{username}")],
@@ -514,13 +514,22 @@ def handle_link(update: Update, context):
             else:
                 parts = text.split("/")
                 shortcode = None
+                # بررسی لینک‌های استاندارد (/p/ یا /reel/)
                 for i, part in enumerate(parts):
                     if part in ("p", "reel") and i + 1 < len(parts):
                         shortcode = parts[i + 1].split("?")[0]
                         break
+                # بررسی لینک‌های جدید (/share/reel/)
+                if not shortcode and "share/reel" in text:
+                    for i, part in enumerate(parts):
+                        if part == "share" and i + 2 < len(parts) and parts[i + 1] == "reel":
+                            shortcode = parts[i + 2].split("?")[0]
+                            break
+                
                 if not shortcode:
                     update.message.reply_text("لینک نامعتبر!")
                     return
+                
                 media_id = ig_client.media_pk_from_code(shortcode)
                 if media_id and media_id != "0":
                     threading.Thread(target=process_instagram_media, args=(media_id, chat_id, context)).start()
