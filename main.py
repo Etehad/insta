@@ -300,17 +300,42 @@ def send_caption_and_cover(media_id, chat_id, context):
 
 def send_first_10_comments(media_id, chat_id, context):
     try:
+        logger.info(f"Fetching first 10 comments for media_id: {media_id}")
         comments = ig_client.media_comments(media_id, amount=10)
         if not comments:
             context.bot.send_message(chat_id=chat_id, text="هیچ کامنتی برای این پست وجود ندارد!")
             return
+        
+        # تمیز کردن متن کامنت‌ها برای جلوگیری از خطای Markdown
+        def sanitize_text(text):
+            # جایگزینی کاراکترهای مشکل‌ساز با نسخه‌های امن
+            text = text.replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
+            # محدود کردن طول متن برای جلوگیری از خطای Telegram
+            return text[:1000] if len(text) > 1000 else text
+
         comment_text = "*10 کامنت اول:*\n"
         for i, comment in enumerate(comments[:10], 1):
             username = comment.user.username
-            text = comment.text
+            text = sanitize_text(comment.text)
             comment_text += f"{i}. [{username}](https://www.instagram.com/{username}/): {text}\n"
         comment_text += "[TaskForce](https://t.me/task_1_4_1_force)"
-        context.bot.send_message(chat_id=chat_id, text=comment_text, parse_mode="Markdown", disable_web_page_preview=True)
+
+        # تلاش برای ارسال با Markdown
+        try:
+            context.bot.send_message(
+                chat_id=chat_id,
+                text=comment_text,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+        except Exception as markdown_error:
+            logger.warning(f"Markdown parsing failed: {str(markdown_error)}. Retrying without parse_mode.")
+            # در صورت خطا، بدون parse_mode ارسال شود
+            context.bot.send_message(
+                chat_id=chat_id,
+                text=comment_text,
+                disable_web_page_preview=True
+            )
     except Exception as e:
         logger.error(f"Error fetching comments: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در دریافت کامنت‌ها: {str(e)}")
