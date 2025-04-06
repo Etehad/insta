@@ -552,7 +552,7 @@ def main():
     logger.info("Starting bot...")
     db.initialize_db()
 
-    flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8080}, daemon=True)
+    flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': int(os.getenv('PORT', 8080))}, daemon=True)
     flask_thread.start()
 
     api_thread = threading.Thread(target=start_api_server, daemon=True)
