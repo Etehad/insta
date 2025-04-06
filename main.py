@@ -84,7 +84,6 @@ def start(update: Update, context):
         "شما می‌توانید:\n"
         "1️⃣ لینک پست/ریل/استوری را مستقیم ارسال کنید\n"
         "2️⃣ پروفایل و استوری پیج‌ها را دریافت کنید\n"
-        "3️⃣ با گفتن 'رندوم' یک پست تصادفی از اکسپلور بگیرید\n",
         reply_markup=reply_markup
     )
 
@@ -482,31 +481,11 @@ def search_instagram(query, chat_id, context):
         logger.error(f"Error searching Instagram: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در جستجو: {str(e)}")
 
-def get_random_explore_post(chat_id, context):
-    try:
-        logger.info(f"Fetching random post from Instagram explore for chat_id: {chat_id}")
-        explore_posts = ig_client.explore()  # دریافت پست‌ها از اکسپلور
-        if not explore_posts:
-            context.bot.send_message(chat_id=chat_id, text="پستی در اکسپلور پیدا نشد!")
-            return
-        media = random.choice(explore_posts)  # انتخاب تصادفی یک پست
-        media_id = media.pk
-        threading.Thread(target=process_instagram_media, args=(media_id, chat_id, context)).start()
-        context.bot.send_message(chat_id=chat_id, text="پست تصادفی در حال ارسال است...")
-    except Exception as e:
-        logger.error(f"Error fetching random explore post: {str(e)}")
-        context.bot.send_message(chat_id=chat_id, text=f"خطا در دریافت پست تصادفی: {str(e)}")
-
 def handle_link(update: Update, context):
     if not check_membership(update, context):
         return
     text = update.message.text
     chat_id = update.message.chat_id
-    
-    if text == "رندوم":
-        logger.info(f"Random post requested by user {update.effective_user.id} in chat {chat_id}")
-        threading.Thread(target=get_random_explore_post, args=(chat_id, context)).start()
-        return
     
     if text.startswith("جستجو "):
         query = text[6:].strip()
@@ -559,7 +538,7 @@ def handle_link(update: Update, context):
     
     if update.message.chat.type != "private":
         return
-    update.message.reply_text("لطفاً لینک اینستاگرام یا دستور 'پیج نام‌کاربری' یا 'جستجو عبارت' یا 'ردیابی page1 - page2' یا 'رندوم' بفرستید!")
+    update.message.reply_text("لطفاً لینک اینستاگرام یا دستور 'پیج نام‌کاربری' یا 'جستجو عبارت' یا 'ردیابی page1 - page2' بفرستید!")
 
 def handle_admin_message(update: Update, context):
     if update.effective_user.id not in ADMIN_IDS:
