@@ -2,7 +2,6 @@ import os
 import threading
 import time
 import logging
-import random
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from instagrapi import Client
@@ -83,7 +82,7 @@ def start(update: Update, context):
         "سلام! به ربات دانلود اینستاگرام خوش آمدید.\n\n"
         "شما می‌توانید:\n"
         "1️⃣ لینک پست/ریل/استوری را مستقیم ارسال کنید\n"
-        "2️⃣ پروفایل و استوری پیج‌ها را دریافت کنید\n"
+        "2️⃣ پروفایل و استوری پیج‌ها را دریافت کنید\n",
         reply_markup=reply_markup
     )
 
@@ -307,9 +306,7 @@ def send_first_10_comments(media_id, chat_id, context):
         
         # تمیز کردن متن کامنت‌ها برای جلوگیری از خطای Markdown
         def sanitize_text(text):
-            # جایگزینی کاراکترهای مشکل‌ساز با نسخه‌های امن
             text = text.replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
-            # محدود کردن طول متن برای جلوگیری از خطای Telegram
             return text[:1000] if len(text) > 1000 else text
 
         comment_text = "*10 کامنت اول:*\n"
@@ -319,7 +316,6 @@ def send_first_10_comments(media_id, chat_id, context):
             comment_text += f"{i}. [{username}](https://www.instagram.com/{username}/): {text}\n"
         comment_text += "[TaskForce](https://t.me/task_1_4_1_force)"
 
-        # تلاش برای ارسال با Markdown
         try:
             context.bot.send_message(
                 chat_id=chat_id,
@@ -329,7 +325,6 @@ def send_first_10_comments(media_id, chat_id, context):
             )
         except Exception as markdown_error:
             logger.warning(f"Markdown parsing failed: {str(markdown_error)}. Retrying without parse_mode.")
-            # در صورت خطا، بدون parse_mode ارسال شود
             context.bot.send_message(
                 chat_id=chat_id,
                 text=comment_text,
