@@ -9,6 +9,7 @@ from instagrapi.exceptions import TwoFactorRequired, ClientError
 import database as db
 from api import start_api_server
 from flask import Flask
+import re
 
 # تنظیم لاگ
 logging.basicConfig(
@@ -60,7 +61,7 @@ def login_instagram():
         except ClientError as e:
             logger.error(f"Instagram login failed: {str(e)}")
             if attempt < max_attempts - 1:
-                time.sleep(random.uniform(5, 15))
+                time.sleep(5)
                 continue
             raise
         except Exception as e:
@@ -215,6 +216,10 @@ def button_handler(update: Update, context):
         media_id = query.data.split("get_comments_")[1]
         chat_id = query.message.chat_id
         threading.Thread(target=send_first_10_comments, args=(media_id, chat_id, context)).start()
+    elif query.data.startswith("send_to_beatjoo_"):
+        media_id = query.data.split("send_to_beatjoo_")[1]
+        chat_id = query.message.chat_id
+        threading.Thread(target=send_to_beatjoo, args=(media_id, chat_id, context)).start()
     elif query.data == "admin_private":
         query.edit_message_text("برای ارسال پیام خصوصی از دستور /pv استفاده کنید. مثال: /pv 12345 سلام چطوری؟")
     elif query.data == "admin_broadcast":
@@ -264,6 +269,7 @@ def process_instagram_media(media_id, chat_id, context):
             video_url = str(media_info.video_url)
             keyboard = [
                 [InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")],
+                [InlineKeyboardButton("دریافت آهنگ پست", callback_data=f"send_to_beatjoo_{media_id}")],
                 [InlineKeyboardButton("دریافت 10 کامنت اول", callback_data=f"get_comments_{media_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -272,6 +278,7 @@ def process_instagram_media(media_id, chat_id, context):
             photo_url = str(media_info.thumbnail_url)
             keyboard = [
                 [InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")],
+                [InlineKeyboardButton("دریافت آهنگ پست", callback_data=f"send_to_beatjoo_{media_id}")],
                 [InlineKeyboardButton("دریافت 10 کامنت اول", callback_data=f"get_comments_{media_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -304,7 +311,6 @@ def send_first_10_comments(media_id, chat_id, context):
             context.bot.send_message(chat_id=chat_id, text="هیچ کامنتی برای این پست وجود ندارد!")
             return
         
-        # تمیز کردن متن کامنت‌ها برای جلوگیری از خطای Markdown
         def sanitize_text(text):
             text = text.replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
             return text[:1000] if len(text) > 1000 else text
@@ -333,6 +339,65 @@ def send_first_10_comments(media_id, chat_id, context):
     except Exception as e:
         logger.error(f"Error fetching comments: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در دریافت کامنت‌ها: {str(e)}")
+
+def send_to_beatjoo(media_id, chat_id, context):
+    try:
+        # اطلاعات رسانه
+        media_info = ig_client.media_info(media_id)
+        media_url = str(media_info.video_url if media_info.media_type == 2 else media_info.thumbnail_url)
+        
+        # ارسال به دایرکت beat.joo
+        beatjoo_user = ig_client.user_info_by_username("beat.joo")
+        ig_client.direct_send(media_url, user_ids=[beatjoo_user.pk])
+        logger.info(f"Media {media_id} sent to beat.joo via Instagram DM")
+        context.bot.send_message(chat_id=chat_id, text="در حال ارسال به beat.joo و انتظار برای پاسخ...")
+
+        # تابع برای چک کردن دایرکت فقط یک بار بعد از 3 ثانیه
+        def check_direct_response():
+            try:
+                threads = ig_client.direct_threads(amount=1)  # فقط آخرین مکالمه
+                for thread in threads:
+                    if str(beatjoo_user.pk) in thread.users:  # مکالمه با beat.joo
+                        last_message = thread.messages[0]  # آخرین پیام
+                        if last_message.user_id == beatjoo_user.pk:  # پیام از beat.joo
+                            message_text = last_message.text
+                            # جستجوی لینک دکمه در پیام
+                            link_match = re.search(r"https://t.me/[^/]+/\d+", message_text)
+                            if link_match:
+                                song_link = link_match.group(0)
+                                logger.info(f"Found song link: {song_link}")
+                                
+                                # استخراج chat_id و message_id از لینک
+                                link_parts = song_link.split("/")
+                                channel_username = f"@{link_parts[3]}"
+                                message_id = int(link_parts[4])
+                                
+                                # فوروارد فایل آهنگ به کاربر
+                                context.bot.forward_message(
+                                    chat_id=chat_id,
+                                    from_chat_id=channel_username,
+                                    message_id=message_id,
+                                    disable_notification=True
+                                )
+                                context.bot.send_message(
+                                    chat_id=chat_id,
+                                    text="*TaskForce*",
+                                    parse_mode="Markdown"
+                                )
+                            else:
+                                context.bot.send_message(chat_id=chat_id, text="لینک آهنگ در پاسخ beat.joo پیدا نشد!")
+                            return
+                context.bot.send_message(chat_id=chat_id, text="پاسخی از beat.joo دریافت نشد!")
+            except Exception as e:
+                logger.error(f"Error checking direct response: {str(e)}")
+                context.bot.send_message(chat_id=chat_id, text=f"خطا در بررسی پاسخ: {str(e)}")
+
+        # اجرای تابع فقط یک بار بعد از 3 ثانیه
+        threading.Timer(3.0, check_direct_response).start()
+
+    except Exception as e:
+        logger.error(f"Error in send_to_beatjoo: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در ارسال به beat.joo: {str(e)}")
 
 def process_instagram_profile(username, chat_id, context):
     try:
@@ -514,12 +579,10 @@ def handle_link(update: Update, context):
             else:
                 parts = text.split("/")
                 shortcode = None
-                # بررسی لینک‌های استاندارد (/p/ یا /reel/)
                 for i, part in enumerate(parts):
                     if part in ("p", "reel") and i + 1 < len(parts):
                         shortcode = parts[i + 1].split("?")[0]
                         break
-                # بررسی لینک‌های جدید (/share/reel/)
                 if not shortcode and "share/reel" in text:
                     for i, part in enumerate(parts):
                         if part == "share" and i + 2 < len(parts) and parts[i + 1] == "reel":
