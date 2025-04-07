@@ -2,7 +2,6 @@ import os
 import threading
 import time
 import logging
-import requests
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from instagrapi import Client
@@ -10,7 +9,6 @@ from instagrapi.exceptions import TwoFactorRequired, ClientError
 import database as db
 from api import start_api_server
 from flask import Flask
-import re
 
 # تنظیم لاگ
 logging.basicConfig(
@@ -30,10 +28,10 @@ REQUIRED_CHANNELS = [
     {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
 ]
 
-GROUP_CHAT_IDS = ["-1002294804720"]
+GROUP_CHAT_IDS = ["-1002294804720"]  # لیست گروه‌ها برای /gap و /broadcast
 
 ig_client = Client()
-ig_client.delay_range = [1, 3]
+ig_client.delay_range = [1, 3]  # کاهش تأخیر برای افزایش سرعت
 
 app = Flask(__name__)
 
@@ -62,7 +60,7 @@ def login_instagram():
         except ClientError as e:
             logger.error(f"Instagram login failed: {str(e)}")
             if attempt < max_attempts - 1:
-                time.sleep(5)
+                time.sleep(random.uniform(5, 15))
                 continue
             raise
         except Exception as e:
@@ -217,10 +215,6 @@ def button_handler(update: Update, context):
         media_id = query.data.split("get_comments_")[1]
         chat_id = query.message.chat_id
         threading.Thread(target=send_first_10_comments, args=(media_id, chat_id, context)).start()
-    elif query.data.startswith("download_song_"):  # تغییر نام دکمه
-        media_id = query.data.split("download_song_")[1]
-        chat_id = query.message.chat_id
-        threading.Thread(target=send_to_beatjoo, args=(media_id, chat_id, context)).start()
     elif query.data == "admin_private":
         query.edit_message_text("برای ارسال پیام خصوصی از دستور /pv استفاده کنید. مثال: /pv 12345 سلام چطوری؟")
     elif query.data == "admin_broadcast":
@@ -270,7 +264,6 @@ def process_instagram_media(media_id, chat_id, context):
             video_url = str(media_info.video_url)
             keyboard = [
                 [InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")],
-                [InlineKeyboardButton("دریافت آهنگ", callback_data=f"download_song_{media_id}")],  # تغییر نام دکمه
                 [InlineKeyboardButton("دریافت 10 کامنت اول", callback_data=f"get_comments_{media_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -279,7 +272,6 @@ def process_instagram_media(media_id, chat_id, context):
             photo_url = str(media_info.thumbnail_url)
             keyboard = [
                 [InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")],
-                [InlineKeyboardButton("دریافت آهنگ", callback_data=f"download_song_{media_id}")],  # تغییر نام دکمه
                 [InlineKeyboardButton("دریافت 10 کامنت اول", callback_data=f"get_comments_{media_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -312,6 +304,7 @@ def send_first_10_comments(media_id, chat_id, context):
             context.bot.send_message(chat_id=chat_id, text="هیچ کامنتی برای این پست وجود ندارد!")
             return
         
+        # تمیز کردن متن کامنت‌ها برای جلوگیری از خطای Markdown
         def sanitize_text(text):
             text = text.replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]')
             return text[:1000] if len(text) > 1000 else text
@@ -341,60 +334,6 @@ def send_first_10_comments(media_id, chat_id, context):
         logger.error(f"Error fetching comments: {str(e)}")
         context.bot.send_message(chat_id=chat_id, text=f"خطا در دریافت کامنت‌ها: {str(e)}")
 
-def send_to_beatjoo(media_id, chat_id, context):
-    try:
-        # دریافت اطلاعات رسانه
-        media_info = ig_client.media_info(media_id)
-        media_url = f"https://www.instagram.com/p/{media_info.code}/"  # لینک پست
-        
-        # ارسال پیام به کاربر
-        context.bot.send_message(chat_id=chat_id, text="در حال دانلود آهنگ از پست...")
-
-        # ارسال درخواست به وب‌سایت دانلود (مثلاً reelsave.app)
-        download_url = "https://reelsave.app/api/instagram/audio"  # آدرس API وب‌سایت (ممکن است نیاز به تغییر داشته باشد)
-        payload = {"url": media_url}
-        headers = {"User-Agent": "Mozilla/5.0"}
-        
-        response = requests.post(download_url, data=payload, headers=headers)
-        if response.status_code != 200:
-            raise Exception("خطا در اتصال به وب‌سایت دانلود")
-        
-        data = response.json()
-        if "audio_url" not in data:
-            raise Exception("لینک دانلود آهنگ پیدا نشد")
-        
-        audio_url = data["audio_url"]
-        audio_response = requests.get(audio_url)
-        
-        if audio_response.status_code != 200:
-            raise Exception("خطا در دانلود فایل آهنگ")
-        
-        # نام آهنگ (اگر در دسترس باشد، در غیر این صورت از کد پست استفاده می‌کنیم)
-        song_name = media_info.caption_text[:50] if media_info.caption_text else f"song_{media_info.code}"
-        song_filename = f"{song_name}.mp3"
-        
-        # ذخیره موقت فایل
-        with open(song_filename, "wb") as f:
-            f.write(audio_response.content)
-        
-        # ارسال فایل آهنگ به کاربر
-        with open(song_filename, "rb") as audio_file:
-            context.bot.send_audio(
-                chat_id=chat_id,
-                audio=audio_file,
-                title=song_name,
-                caption="*TaskForce*",
-                parse_mode="Markdown"
-            )
-        
-        # حذف فایل موقت
-        os.remove(song_filename)
-        logger.info(f"Song {song_name} downloaded and sent to chat_id {chat_id}")
-
-    except Exception as e:
-        logger.error(f"Error in downloading song: {str(e)}")
-        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود آهنگ: {str(e)}")
-
 def process_instagram_profile(username, chat_id, context):
     try:
         logger.info(f"Processing Instagram profile for username: {username}, chat_id: {chat_id}")
@@ -417,7 +356,7 @@ def process_instagram_profile(username, chat_id, context):
             f"*تعداد پست‌ها:* {posts}\n"
             f"*وضعیت پیج:* {is_private}\n"
             f"*تعداد استوری‌ها:* {story_count}\n"
-            "[TaskForce](https://t.me/task_1_4_1_force)"
+            "[TaskForce](https://t.me/task_1_4_1_force]"
         )
         keyboard = [
             [InlineKeyboardButton("دریافت استوری‌ها", callback_data=f"download_stories_{username}")],
@@ -575,10 +514,12 @@ def handle_link(update: Update, context):
             else:
                 parts = text.split("/")
                 shortcode = None
+                # بررسی لینک‌های استاندارد (/p/ یا /reel/)
                 for i, part in enumerate(parts):
                     if part in ("p", "reel") and i + 1 < len(parts):
                         shortcode = parts[i + 1].split("?")[0]
                         break
+                # بررسی لینک‌های جدید (/share/reel/)
                 if not shortcode and "share/reel" in text:
                     for i, part in enumerate(parts):
                         if part == "share" and i + 2 < len(parts) and parts[i + 1] == "reel":
