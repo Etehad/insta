@@ -269,7 +269,7 @@ def process_instagram_media(media_id, chat_id, context):
             video_url = str(media_info.video_url)
             keyboard = [
                 [InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")],
-                [InlineKeyboardButton("دریافت آهنگ پست", callback_data=f"send_to_beatjoo_{media_id}")],
+                [InlineKeyboardButton("ارسال به beat.joo", callback_data=f"send_to_beatjoo_{media_id}")],
                 [InlineKeyboardButton("دریافت 10 کامنت اول", callback_data=f"get_comments_{media_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -278,7 +278,7 @@ def process_instagram_media(media_id, chat_id, context):
             photo_url = str(media_info.thumbnail_url)
             keyboard = [
                 [InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")],
-                [InlineKeyboardButton("دریافت آهنگ پست", callback_data=f"send_to_beatjoo_{media_id}")],
+                [InlineKeyboardButton("ارسال به beat.joo", callback_data=f"send_to_beatjoo_{media_id}")],
                 [InlineKeyboardButton("دریافت 10 کامنت اول", callback_data=f"get_comments_{media_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -344,13 +344,12 @@ def send_to_beatjoo(media_id, chat_id, context):
     try:
         # اطلاعات رسانه
         media_info = ig_client.media_info(media_id)
-        media_url = str(media_info.video_url if media_info.media_type == 2 else media_info.thumbnail_url)
         
-        # ارسال به دایرکت beat.joo
+        # ارسال پست به دایرکت beat.joo به صورت Share
         beatjoo_user = ig_client.user_info_by_username("beat.joo")
-        ig_client.direct_send(media_url, user_ids=[beatjoo_user.pk])
-        logger.info(f"Media {media_id} sent to beat.joo via Instagram DM")
-        context.bot.send_message(chat_id=chat_id, text="در حال ارسال به beat.joo و انتظار برای پاسخ...")
+        ig_client.direct_media_share(media_id, user_ids=[beatjoo_user.pk])
+        logger.info(f"Media {media_id} shared to beat.joo via Instagram DM")
+        context.bot.send_message(chat_id=chat_id, text="پست به beat.joo ارسال شد، در حال انتظار برای پاسخ...")
 
         # تابع برای چک کردن دایرکت فقط یک بار بعد از 3 ثانیه
         def check_direct_response():
@@ -450,7 +449,7 @@ def download_last_post(username, chat_id, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
         if media.media_type == 1:
             media_url = str(media.thumbnail_url)
-            media_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
+            media_captionraak_force)"
             context.bot.send_photo(chat_id=chat_id, photo=media_url, caption=media_caption, parse_mode="Markdown", reply_markup=reply_markup)
         elif media.media_type == 2:
             media_url = str(media.video_url)
