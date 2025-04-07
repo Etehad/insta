@@ -2,6 +2,7 @@ import os
 import threading
 import time
 import logging
+import requests
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from instagrapi import Client
@@ -29,10 +30,10 @@ REQUIRED_CHANNELS = [
     {"chat_id": "-1001860545237", "username": "@task_1_4_1_force"}
 ]
 
-GROUP_CHAT_IDS = ["-1002294804720"]  # لیست گروه‌ها برای /gap و /broadcast
+GROUP_CHAT_IDS = ["-1002294804720"]
 
 ig_client = Client()
-ig_client.delay_range = [1, 3]  # کاهش تأخیر برای افزایش سرعت
+ig_client.delay_range = [1, 3]
 
 app = Flask(__name__)
 
@@ -216,8 +217,8 @@ def button_handler(update: Update, context):
         media_id = query.data.split("get_comments_")[1]
         chat_id = query.message.chat_id
         threading.Thread(target=send_first_10_comments, args=(media_id, chat_id, context)).start()
-    elif query.data.startswith("send_to_beatjoo_"):
-        media_id = query.data.split("send_to_beatjoo_")[1]
+    elif query.data.startswith("download_song_"):  # تغییر نام دکمه
+        media_id = query.data.split("download_song_")[1]
         chat_id = query.message.chat_id
         threading.Thread(target=send_to_beatjoo, args=(media_id, chat_id, context)).start()
     elif query.data == "admin_private":
@@ -269,7 +270,7 @@ def process_instagram_media(media_id, chat_id, context):
             video_url = str(media_info.video_url)
             keyboard = [
                 [InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")],
-                [InlineKeyboardButton("ارسال به beat.joo", callback_data=f"send_to_beatjoo_{media_id}")],
+                [InlineKeyboardButton("دریافت آهنگ", callback_data=f"download_song_{media_id}")],  # تغییر نام دکمه
                 [InlineKeyboardButton("دریافت 10 کامنت اول", callback_data=f"get_comments_{media_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -278,7 +279,7 @@ def process_instagram_media(media_id, chat_id, context):
             photo_url = str(media_info.thumbnail_url)
             keyboard = [
                 [InlineKeyboardButton("دریافت کاور و کپشن", callback_data=f"get_caption_{media_id}")],
-                [InlineKeyboardButton("ارسال به beat.joo", callback_data=f"send_to_beatjoo_{media_id}")],
+                [InlineKeyboardButton("دریافت آهنگ", callback_data=f"download_song_{media_id}")],  # تغییر نام دکمه
                 [InlineKeyboardButton("دریافت 10 کامنت اول", callback_data=f"get_comments_{media_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -342,61 +343,57 @@ def send_first_10_comments(media_id, chat_id, context):
 
 def send_to_beatjoo(media_id, chat_id, context):
     try:
-        # اطلاعات رسانه
+        # دریافت اطلاعات رسانه
         media_info = ig_client.media_info(media_id)
+        media_url = f"https://www.instagram.com/p/{media_info.code}/"  # لینک پست
         
-        # ارسال پست به دایرکت beat.joo به صورت Share
-        beatjoo_user = ig_client.user_info_by_username("beat.joo")
-        ig_client.direct_media_share(media_id, user_ids=[beatjoo_user.pk])
-        logger.info(f"Media {media_id} shared to beat.joo via Instagram DM")
-        context.bot.send_message(chat_id=chat_id, text="پست به beat.joo ارسال شد، در حال انتظار برای پاسخ...")
+        # ارسال پیام به کاربر
+        context.bot.send_message(chat_id=chat_id, text="در حال دانلود آهنگ از پست...")
 
-        # تابع برای چک کردن دایرکت فقط یک بار بعد از 3 ثانیه
-        def check_direct_response():
-            try:
-                threads = ig_client.direct_threads(amount=1)  # فقط آخرین مکالمه
-                for thread in threads:
-                    if str(beatjoo_user.pk) in thread.users:  # مکالمه با beat.joo
-                        last_message = thread.messages[0]  # آخرین پیام
-                        if last_message.user_id == beatjoo_user.pk:  # پیام از beat.joo
-                            message_text = last_message.text
-                            # جستجوی لینک دکمه در پیام
-                            link_match = re.search(r"https://t.me/[^/]+/\d+", message_text)
-                            if link_match:
-                                song_link = link_match.group(0)
-                                logger.info(f"Found song link: {song_link}")
-                                
-                                # استخراج chat_id و message_id از لینک
-                                link_parts = song_link.split("/")
-                                channel_username = f"@{link_parts[3]}"
-                                message_id = int(link_parts[4])
-                                
-                                # فوروارد فایل آهنگ به کاربر
-                                context.bot.forward_message(
-                                    chat_id=chat_id,
-                                    from_chat_id=channel_username,
-                                    message_id=message_id,
-                                    disable_notification=True
-                                )
-                                context.bot.send_message(
-                                    chat_id=chat_id,
-                                    text="*TaskForce*",
-                                    parse_mode="Markdown"
-                                )
-                            else:
-                                context.bot.send_message(chat_id=chat_id, text="لینک آهنگ در پاسخ beat.joo پیدا نشد!")
-                            return
-                context.bot.send_message(chat_id=chat_id, text="پاسخی از beat.joo دریافت نشد!")
-            except Exception as e:
-                logger.error(f"Error checking direct response: {str(e)}")
-                context.bot.send_message(chat_id=chat_id, text=f"خطا در بررسی پاسخ: {str(e)}")
-
-        # اجرای تابع فقط یک بار بعد از 3 ثانیه
-        threading.Timer(3.0, check_direct_response).start()
+        # ارسال درخواست به وب‌سایت دانلود (مثلاً reelsave.app)
+        download_url = "https://reelsave.app/api/instagram/audio"  # آدرس API وب‌سایت (ممکن است نیاز به تغییر داشته باشد)
+        payload = {"url": media_url}
+        headers = {"User-Agent": "Mozilla/5.0"}
+        
+        response = requests.post(download_url, data=payload, headers=headers)
+        if response.status_code != 200:
+            raise Exception("خطا در اتصال به وب‌سایت دانلود")
+        
+        data = response.json()
+        if "audio_url" not in data:
+            raise Exception("لینک دانلود آهنگ پیدا نشد")
+        
+        audio_url = data["audio_url"]
+        audio_response = requests.get(audio_url)
+        
+        if audio_response.status_code != 200:
+            raise Exception("خطا در دانلود فایل آهنگ")
+        
+        # نام آهنگ (اگر در دسترس باشد، در غیر این صورت از کد پست استفاده می‌کنیم)
+        song_name = media_info.caption_text[:50] if media_info.caption_text else f"song_{media_info.code}"
+        song_filename = f"{song_name}.mp3"
+        
+        # ذخیره موقت فایل
+        with open(song_filename, "wb") as f:
+            f.write(audio_response.content)
+        
+        # ارسال فایل آهنگ به کاربر
+        with open(song_filename, "rb") as audio_file:
+            context.bot.send_audio(
+                chat_id=chat_id,
+                audio=audio_file,
+                title=song_name,
+                caption="*TaskForce*",
+                parse_mode="Markdown"
+            )
+        
+        # حذف فایل موقت
+        os.remove(song_filename)
+        logger.info(f"Song {song_name} downloaded and sent to chat_id {chat_id}")
 
     except Exception as e:
-        logger.error(f"Error in send_to_beatjoo: {str(e)}")
-        context.bot.send_message(chat_id=chat_id, text=f"خطا در ارسال به beat.joo: {str(e)}")
+        logger.error(f"Error in downloading song: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"خطا در دانلود آهنگ: {str(e)}")
 
 def process_instagram_profile(username, chat_id, context):
     try:
@@ -420,7 +417,7 @@ def process_instagram_profile(username, chat_id, context):
             f"*تعداد پست‌ها:* {posts}\n"
             f"*وضعیت پیج:* {is_private}\n"
             f"*تعداد استوری‌ها:* {story_count}\n"
-            "[TaskForce](https://t.me/task_1_4_1_force]"
+            "[TaskForce](https://t.me/task_1_4_1_force)"
         )
         keyboard = [
             [InlineKeyboardButton("دریافت استوری‌ها", callback_data=f"download_stories_{username}")],
