@@ -449,7 +449,7 @@ def download_last_post(username, chat_id, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
         if media.media_type == 1:
             media_url = str(media.thumbnail_url)
-            media_captionraak_force)"
+            media_caption = "[TaskForce](https://t.me/task_1_4_1_force)"
             context.bot.send_photo(chat_id=chat_id, photo=media_url, caption=media_caption, parse_mode="Markdown", reply_markup=reply_markup)
         elif media.media_type == 2:
             media_url = str(media.video_url)
