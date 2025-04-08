@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TOKEN = "7872003751:AAForhz28960IHKBJoZUoymEvDpU_u85JKQ"
-INSTAGRAM_USERNAME = "etehad141"
+INSTAGRAM_USERNAME = "etehadtaskforce"
 INSTAGRAM_PASSWORD = "Aa123456"
 SESSION_FILE = "session.json"
 ADMIN_IDS = [6473845417, 1516721587]
